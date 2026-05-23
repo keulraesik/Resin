@@ -205,6 +205,10 @@ export function PlatformPage() {
                     <span>{t("租约时长")}</span>
                     <strong>{stickyTTL}</strong>
                   </span>
+                  <span className="platform-fact">
+                    <span>{t("租约过期")}</span>
+                    <strong>{platform.sticky_ttl_sliding ? t("滑动") : t("固定")}</strong>
+                  </span>
                 </div>
                 <div className="platform-tile-foot">
                   <span className="platform-tile-meta">
@@ -259,6 +263,26 @@ export function PlatformPage() {
                   {t("租约保持时长（可选）")}
                 </label>
                 <Input id="create-sticky" placeholder={t("例如 168h")} {...createForm.register("sticky_ttl")} />
+              </div>
+
+              <div className="field-group">
+                <label className="field-label" htmlFor="create-sticky-sliding" style={{ visibility: "hidden" }}>
+                  {t("滑动过期")}
+                </label>
+                <div className="subscription-switch-item">
+                  <label className="subscription-switch-label" htmlFor="create-sticky-sliding">
+                    <span>{t("滑动过期")}</span>
+                    <span
+                      className="subscription-info-icon"
+                      title={t("开启后，同一账号持续访问会刷新租约到期时间；关闭时租约按创建时间固定到期。")}
+                      aria-label={t("开启后，同一账号持续访问会刷新租约到期时间；关闭时租约按创建时间固定到期。")}
+                      tabIndex={0}
+                    >
+                      <Info size={13} />
+                    </span>
+                  </label>
+                  <Switch id="create-sticky-sliding" {...createForm.register("sticky_ttl_sliding")} />
+                </div>
               </div>
 
               <div className="field-group">

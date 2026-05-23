@@ -19,6 +19,7 @@ func TestBuildFromModel_Success(t *testing.T) {
 		ReverseProxyEmptyAccountBehavior: "FIXED_HEADER",
 		ReverseProxyFixedAccountHeader:   "x-account-id",
 		AllocationPolicy:                 "PREFER_LOW_LATENCY",
+		StickyTTLSliding:                 true,
 		PassiveCircuitBreakerDisabled:    true,
 	}
 
@@ -32,6 +33,9 @@ func TestBuildFromModel_Success(t *testing.T) {
 	}
 	if plat.StickyTTLNs != mp.StickyTTLNs {
 		t.Fatalf("sticky ttl mismatch: got %d want %d", plat.StickyTTLNs, mp.StickyTTLNs)
+	}
+	if !plat.StickyTTLSliding {
+		t.Fatal("sticky ttl sliding mismatch: got false want true")
 	}
 	if plat.ReverseProxyMissAction != mp.ReverseProxyMissAction {
 		t.Fatalf("miss action mismatch: got %q want %q", plat.ReverseProxyMissAction, mp.ReverseProxyMissAction)

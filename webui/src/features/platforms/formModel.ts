@@ -31,6 +31,7 @@ export const platformFormSchema = z.object({
       message: "平台名称不能为保留字",
     }),
   sticky_ttl: z.string().optional(),
+  sticky_ttl_sliding: z.boolean(),
   regex_filters_text: z.string().optional(),
   region_filters_text: z.string().optional(),
   reverse_proxy_miss_action: z.enum(missActions),
@@ -56,6 +57,7 @@ export type PlatformFormValues = z.infer<typeof platformFormSchema>;
 export const defaultPlatformFormValues: PlatformFormValues = {
   name: "",
   sticky_ttl: "",
+  sticky_ttl_sliding: false,
   regex_filters_text: "",
   region_filters_text: "",
   reverse_proxy_miss_action: "TREAT_AS_EMPTY",
@@ -72,6 +74,7 @@ export function platformToFormValues(platform: Platform): PlatformFormValues {
   return {
     name: platform.name,
     sticky_ttl: platform.sticky_ttl,
+    sticky_ttl_sliding: platform.sticky_ttl_sliding,
     regex_filters_text: regexFilters.join("\n"),
     region_filters_text: regionFilters.join("\n"),
     reverse_proxy_miss_action: platform.reverse_proxy_miss_action,
@@ -85,6 +88,7 @@ export function platformToFormValues(platform: Platform): PlatformFormValues {
 function toPlatformPayloadBase(values: PlatformFormValues) {
   return {
     name: values.name.trim(),
+    sticky_ttl_sliding: values.sticky_ttl_sliding,
     regex_filters: parseLinesToList(values.regex_filters_text),
     region_filters: parseLinesToList(values.region_filters_text, (value) => value.toLowerCase()),
     reverse_proxy_miss_action: values.reverse_proxy_miss_action,

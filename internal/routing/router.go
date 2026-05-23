@@ -196,10 +196,10 @@ func (r *Router) decideStickyLease(
 	}
 
 	if loaded {
-		if newLease, hitResult, ok := r.tryLeaseHit(plat, account, current, nowNs); ok {
+		if newLease, hitResult, ok := r.tryLeaseHit(plat, account, current, now, nowNs); ok {
 			return newLease, xsync.UpdateOp, hitResult, nil
 		}
-		if newLease, rotatedResult, ok := r.tryLeaseSameIPRotation(plat, account, current, targetDomain, nowNs); ok {
+		if newLease, rotatedResult, ok := r.tryLeaseSameIPRotation(plat, account, current, targetDomain, now, nowNs); ok {
 			return newLease, xsync.UpdateOp, rotatedResult, nil
 		}
 		invalidation = leaseInvalidationRemove
@@ -252,6 +252,7 @@ func (r *Router) tryLeaseHit(
 	plat *platform.Platform,
 	account string,
 	current Lease,
+	now time.Time,
 	nowNs int64,
 ) (Lease, RouteResult, bool) {
 	entry, ok := r.pool.GetEntry(current.NodeHash)
@@ -261,6 +262,7 @@ func (r *Router) tryLeaseHit(
 
 	newLease := current
 	newLease.LastAccessedNs = nowNs
+	applySlidingLeaseExpiry(plat, &newLease, now)
 	r.emitLeaseEvent(LeaseEvent{
 		Type:       LeaseTouch,
 		PlatformID: plat.ID,
@@ -280,6 +282,7 @@ func (r *Router) tryLeaseSameIPRotation(
 	account string,
 	current Lease,
 	targetDomain string,
+	now time.Time,
 	nowNs int64,
 ) (Lease, RouteResult, bool) {
 	bestHash, ok := chooseSameIPRotationCandidate(
@@ -297,6 +300,7 @@ func (r *Router) tryLeaseSameIPRotation(
 	newLease := current
 	newLease.NodeHash = bestHash
 	newLease.LastAccessedNs = nowNs
+	applySlidingLeaseExpiry(plat, &newLease, now)
 	r.emitLeaseEvent(LeaseEvent{
 		Type:       LeaseReplace,
 		PlatformID: plat.ID,
@@ -311,6 +315,21 @@ func (r *Router) tryLeaseSameIPRotation(
 	}, true
 }
 
+func applySlidingLeaseExpiry(plat *platform.Platform, lease *Lease, now time.Time) {
+	if plat == nil || lease == nil || !plat.StickyTTLSliding {
+		return
+	}
+	ttl := effectiveStickyTTL(plat)
+	lease.ExpiryNs = now.Add(time.Duration(ttl)).UnixNano()
+}
+
+func effectiveStickyTTL(plat *platform.Platform) int64 {
+	if plat != nil && plat.StickyTTLNs > 0 {
+		return plat.StickyTTLNs
+	}
+	return int64(24 * time.Hour)
+}
+
 func (r *Router) createLease(
 	plat *platform.Platform,
 	state *PlatformRoutingState,
@@ -322,10 +341,7 @@ func (r *Router) createLease(
 	if err != nil {
 		return Lease{}, RouteResult{}, err
 	}
-	ttl := plat.StickyTTLNs
-	if ttl <= 0 {
-		ttl = int64(24 * time.Hour) // Default safeguard
-	}
+	ttl := effectiveStickyTTL(plat)
 
 	lease := Lease{
 		NodeHash:       h,

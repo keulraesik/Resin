@@ -264,6 +264,10 @@ export function PlatformDetailPage() {
                   <strong>{stickyTTL}</strong>
                 </span>
                 <span className="platform-fact">
+                  <span>{t("租约过期")}</span>
+                  <strong>{platform.sticky_ttl_sliding ? t("滑动") : t("固定")}</strong>
+                </span>
+                <span className="platform-fact">
                   <span>{t("策略")}</span>
                   <strong>{t(allocationPolicyLabel[platform.allocation_policy])}</strong>
                 </span>
@@ -352,6 +356,26 @@ export function PlatformDetailPage() {
                       invalid={Boolean(editForm.formState.errors.sticky_ttl)}
                       {...editForm.register("sticky_ttl")}
                     />
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="detail-edit-sticky-sliding" style={{ visibility: "hidden" }}>
+                      {t("滑动过期")}
+                    </label>
+                    <div className="subscription-switch-item">
+                      <label className="subscription-switch-label" htmlFor="detail-edit-sticky-sliding">
+                        <span>{t("滑动过期")}</span>
+                        <span
+                          className="subscription-info-icon"
+                          title={t("开启后，同一账号持续访问会刷新租约到期时间；关闭时租约按创建时间固定到期。")}
+                          aria-label={t("开启后，同一账号持续访问会刷新租约到期时间；关闭时租约按创建时间固定到期。")}
+                          tabIndex={0}
+                        >
+                          <Info size={13} />
+                        </span>
+                      </label>
+                      <Switch id="detail-edit-sticky-sliding" {...editForm.register("sticky_ttl_sliding")} />
+                    </div>
                   </div>
 
                   <div className="field-group">

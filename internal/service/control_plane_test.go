@@ -885,6 +885,7 @@ func TestDeletePlatform_DoesNotDecodeCorruptPersistedFiltersJSON(t *testing.T) {
 		nil,
 		nil,
 		platformRow.StickyTTLNs,
+		platformRow.StickyTTLSliding,
 		platformRow.ReverseProxyMissAction,
 		string(platform.ReverseProxyEmptyAccountBehaviorAccountHeaderRule),
 		"",
@@ -929,6 +930,7 @@ func TestResetPlatformToDefault_SupportsBuiltInDefaultPlatform(t *testing.T) {
 		RegionFilters:          []string{"us"},
 		ReverseProxyMissAction: string(platform.ReverseProxyMissActionTreatAsEmpty),
 		AllocationPolicy:       string(platform.AllocationPolicyBalanced),
+		StickyTTLSliding:       true,
 		UpdatedAtNs:            time.Now().UnixNano(),
 	}
 	if err := engine.UpsertPlatform(defaultRow); err != nil {
@@ -948,6 +950,7 @@ func TestResetPlatformToDefault_SupportsBuiltInDefaultPlatform(t *testing.T) {
 		nil,
 		nil,
 		defaultRow.StickyTTLNs,
+		defaultRow.StickyTTLSliding,
 		defaultRow.ReverseProxyMissAction,
 		string(platform.ReverseProxyEmptyAccountBehaviorAccountHeaderRule),
 		"",
@@ -980,6 +983,9 @@ func TestResetPlatformToDefault_SupportsBuiltInDefaultPlatform(t *testing.T) {
 	if resp.StickyTTL != (45 * time.Minute).String() {
 		t.Fatalf("response sticky_ttl = %q, want %q", resp.StickyTTL, (45 * time.Minute).String())
 	}
+	if resp.StickyTTLSliding {
+		t.Fatal("response sticky_ttl_sliding = true, want false")
+	}
 	if !reflect.DeepEqual(resp.RegexFilters, []string{"^prod-"}) {
 		t.Fatalf("response regex_filters = %v, want %v", resp.RegexFilters, []string{"^prod-"})
 	}
@@ -1003,6 +1009,9 @@ func TestResetPlatformToDefault_SupportsBuiltInDefaultPlatform(t *testing.T) {
 	if stored.StickyTTLNs != int64(45*time.Minute) {
 		t.Fatalf("stored sticky_ttl_ns = %d, want %d", stored.StickyTTLNs, int64(45*time.Minute))
 	}
+	if stored.StickyTTLSliding {
+		t.Fatal("stored sticky_ttl_sliding = true, want false")
+	}
 	if !reflect.DeepEqual(stored.RegexFilters, []string{"^prod-"}) {
 		t.Fatalf("stored regex_filters = %v, want %v", stored.RegexFilters, []string{"^prod-"})
 	}
@@ -1025,6 +1034,9 @@ func TestResetPlatformToDefault_SupportsBuiltInDefaultPlatform(t *testing.T) {
 	}
 	if plat.StickyTTLNs != int64(45*time.Minute) {
 		t.Fatalf("pool sticky_ttl_ns = %d, want %d", plat.StickyTTLNs, int64(45*time.Minute))
+	}
+	if plat.StickyTTLSliding {
+		t.Fatal("pool sticky_ttl_sliding = true, want false")
 	}
 	if len(plat.RegexFilters) != 1 || plat.RegexFilters[0].String() != "^prod-" {
 		t.Fatalf("pool regex_filters = %v, want [%q]", plat.RegexFilters, "^prod-")
@@ -1090,6 +1102,7 @@ func TestResetPlatformToDefault_DoesNotDecodeCorruptPersistedFiltersJSON(t *test
 		nil,
 		nil,
 		platformRow.StickyTTLNs,
+		platformRow.StickyTTLSliding,
 		platformRow.ReverseProxyMissAction,
 		string(platform.ReverseProxyEmptyAccountBehaviorAccountHeaderRule),
 		"",

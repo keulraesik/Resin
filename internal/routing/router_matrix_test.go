@@ -275,7 +275,7 @@ func TestRouteRequest_SameIPRotationMissRecreatesLease(t *testing.T) {
 		return NewPlatformRoutingState(), false
 	})
 
-	oldExpiry := time.Now().Add(time.Hour).UnixNano()
+	oldExpiry := time.Now().Add(30 * time.Second).UnixNano()
 	oldLease := Lease{
 		NodeHash:       currentHash,
 		EgressIP:       currentEntry.GetEgressIP(),
@@ -302,8 +302,8 @@ func TestRouteRequest_SameIPRotationMissRecreatesLease(t *testing.T) {
 	if newLease.NodeHash != replacementHash {
 		t.Fatalf("lease node not updated: got=%s want=%s", newLease.NodeHash.Hex(), replacementHash.Hex())
 	}
-	if newLease.ExpiryNs == oldExpiry {
-		t.Fatalf("recreated lease must have new expiry, still got old %d", oldExpiry)
+	if newLease.ExpiryNs <= oldExpiry {
+		t.Fatalf("recreated lease must have later expiry, got %d old %d", newLease.ExpiryNs, oldExpiry)
 	}
 	if got := state.IPLoadStats.Get(oldLease.EgressIP); got != 0 {
 		t.Fatalf("old egress ip load should be 0, got %d", got)

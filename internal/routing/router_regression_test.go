@@ -159,6 +159,70 @@ func newTestRouter(pool PoolAccessor, onEvent LeaseEventFunc) *Router {
 	})
 }
 
+func TestStickyLeaseHit_RefreshesExpiryOnlyWhenSlidingEnabled(t *testing.T) {
+	pool := newRouterTestPool()
+	plat := platform.NewPlatform("plat-sliding", "Plat-Sliding", nil, nil)
+	plat.StickyTTLNs = int64(10 * time.Minute)
+	pool.addPlatform(plat)
+
+	h, entry := newRoutableEntry(t, `{"id":"sliding-hit"}`, "203.0.113.70")
+	pool.addEntry(h, entry)
+	pool.rebuildPlatformView(plat)
+
+	router := newTestRouter(pool, nil)
+	state := router.ensurePlatformState(plat.ID)
+	oldExpiry := time.Now().Add(30 * time.Second).UnixNano()
+	state.Leases.CreateLease("acct-fixed", Lease{
+		NodeHash:       h,
+		EgressIP:       entry.GetEgressIP(),
+		CreatedAtNs:    time.Now().Add(-time.Minute).UnixNano(),
+		ExpiryNs:       oldExpiry,
+		LastAccessedNs: time.Now().Add(-time.Minute).UnixNano(),
+	})
+
+	if _, err := router.RouteRequest(plat.Name, "acct-fixed", "https://example.com"); err != nil {
+		t.Fatalf("fixed route: %v", err)
+	}
+	fixedLease, ok := state.Leases.GetLease("acct-fixed")
+	if !ok {
+		t.Fatal("expected fixed lease")
+	}
+	if fixedLease.ExpiryNs != oldExpiry {
+		t.Fatalf("fixed lease expiry changed: got %d, want %d", fixedLease.ExpiryNs, oldExpiry)
+	}
+	if fixedLease.LastAccessedNs <= fixedLease.CreatedAtNs {
+		t.Fatalf("fixed lease last_accessed should update: %+v", fixedLease)
+	}
+
+	plat.StickyTTLSliding = true
+	slidingOldExpiry := time.Now().Add(30 * time.Second).UnixNano()
+	state.Leases.CreateLease("acct-sliding", Lease{
+		NodeHash:       h,
+		EgressIP:       entry.GetEgressIP(),
+		CreatedAtNs:    time.Now().Add(-time.Minute).UnixNano(),
+		ExpiryNs:       slidingOldExpiry,
+		LastAccessedNs: time.Now().Add(-time.Minute).UnixNano(),
+	})
+
+	before := time.Now()
+	if _, err := router.RouteRequest(plat.Name, "acct-sliding", "https://example.com"); err != nil {
+		t.Fatalf("sliding route: %v", err)
+	}
+	after := time.Now()
+	slidingLease, ok := state.Leases.GetLease("acct-sliding")
+	if !ok {
+		t.Fatal("expected sliding lease")
+	}
+	if slidingLease.ExpiryNs <= slidingOldExpiry {
+		t.Fatalf("sliding lease expiry did not extend: got %d, old %d", slidingLease.ExpiryNs, slidingOldExpiry)
+	}
+	if slidingLease.ExpiryNs < before.Add(platTTLDuration(plat)).UnixNano() ||
+		slidingLease.ExpiryNs > after.Add(platTTLDuration(plat)).UnixNano() {
+		t.Fatalf("sliding expiry outside expected window: got %v before=%v after=%v",
+			time.Unix(0, slidingLease.ExpiryNs), before, after)
+	}
+}
+
 func TestRouteRequest_SameIPRotationPrefersTargetLatencySample(t *testing.T) {
 	pool := newRouterTestPool()
 	plat := platform.NewPlatform("plat-1", "Plat-1", nil, nil)
@@ -246,6 +310,75 @@ func TestRouteRequest_SameIPRotationPrefersTargetLatencySample(t *testing.T) {
 	if updatedLease.ExpiryNs != originalLease.ExpiryNs {
 		t.Fatalf("same-ip rotation must not change expiry: got %d want %d", updatedLease.ExpiryNs, originalLease.ExpiryNs)
 	}
+}
+
+func TestRouteRequest_SameIPRotationRefreshesExpiryWhenSlidingEnabled(t *testing.T) {
+	pool := newRouterTestPool()
+	plat := platform.NewPlatform("plat-rotation-sliding", "Plat-Rotation-Sliding", nil, nil)
+	plat.StickyTTLNs = int64(time.Hour)
+	plat.StickyTTLSliding = true
+	pool.addPlatform(plat)
+
+	currentHash, currentEntry := newRoutableEntry(t, `{"id":"sliding-current"}`, "198.51.100.88")
+	candidateHash, candidateEntry := newRoutableEntry(t, `{"id":"sliding-candidate"}`, "198.51.100.88")
+	pool.addEntry(currentHash, currentEntry)
+	pool.addEntry(candidateHash, candidateEntry)
+	pool.rebuildPlatformView(plat)
+
+	currentEntry.CircuitOpenSince.Store(time.Now().UnixNano())
+	plat.NotifyDirty(
+		currentHash,
+		pool.GetEntry,
+		func(_ string, _ node.Hash) (string, bool, []string, bool) { return "", true, nil, true },
+		func(_ netip.Addr) string { return "" },
+	)
+	if plat.View().Contains(currentHash) {
+		t.Fatal("expected current node removed from platform view")
+	}
+	if !plat.View().Contains(candidateHash) {
+		t.Fatal("expected same-IP candidate in platform view")
+	}
+
+	router := newTestRouter(pool, nil)
+	state := router.ensurePlatformState(plat.ID)
+	oldExpiry := time.Now().Add(30 * time.Second).UnixNano()
+	state.Leases.CreateLease("acct-rotation-sliding", Lease{
+		NodeHash:       currentHash,
+		EgressIP:       currentEntry.GetEgressIP(),
+		CreatedAtNs:    time.Now().Add(-time.Minute).UnixNano(),
+		ExpiryNs:       oldExpiry,
+		LastAccessedNs: time.Now().Add(-time.Minute).UnixNano(),
+	})
+
+	before := time.Now()
+	res, err := router.RouteRequest(plat.Name, "acct-rotation-sliding", "https://example.com")
+	if err != nil {
+		t.Fatalf("route request: %v", err)
+	}
+	after := time.Now()
+	if res.NodeHash != candidateHash {
+		t.Fatalf("routed hash: got %s want %s", res.NodeHash.Hex(), candidateHash.Hex())
+	}
+	if res.LeaseCreated {
+		t.Fatal("same-IP rotation should replace existing lease without creating a new lease")
+	}
+
+	updatedLease, ok := state.Leases.GetLease("acct-rotation-sliding")
+	if !ok {
+		t.Fatal("expected updated lease")
+	}
+	if updatedLease.ExpiryNs <= oldExpiry {
+		t.Fatalf("sliding same-IP rotation did not extend expiry: got %d old %d", updatedLease.ExpiryNs, oldExpiry)
+	}
+	if updatedLease.ExpiryNs < before.Add(platTTLDuration(plat)).UnixNano() ||
+		updatedLease.ExpiryNs > after.Add(platTTLDuration(plat)).UnixNano() {
+		t.Fatalf("sliding same-IP expiry outside expected window: got %v before=%v after=%v",
+			time.Unix(0, updatedLease.ExpiryNs), before, after)
+	}
+}
+
+func platTTLDuration(plat *platform.Platform) time.Duration {
+	return time.Duration(plat.StickyTTLNs)
 }
 
 func TestRouteRequest_SelectedNodeRemovedAfterPick_EmitsLeaseRemove(t *testing.T) {

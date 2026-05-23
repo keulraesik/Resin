@@ -466,6 +466,7 @@ func ensureDefaultPlatform(
 		ID:                               platform.DefaultPlatformID,
 		Name:                             platform.DefaultPlatformName,
 		StickyTTLNs:                      int64(envCfg.DefaultPlatformStickyTTL),
+		StickyTTLSliding:                 false,
 		RegexFilters:                     append([]string(nil), envCfg.DefaultPlatformRegexFilters...),
 		RegionFilters:                    append([]string(nil), envCfg.DefaultPlatformRegionFilters...),
 		ReverseProxyMissAction:           envCfg.DefaultPlatformReverseProxyMissAction,

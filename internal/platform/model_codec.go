@@ -49,6 +49,7 @@ func NewConfiguredPlatform(
 	regexFilters []*regexp.Regexp,
 	regionFilters []string,
 	stickyTTLNs int64,
+	stickyTTLSliding bool,
 	missAction string,
 	emptyAccountBehavior string,
 	fixedAccountHeader string,
@@ -62,6 +63,7 @@ func NewConfiguredPlatform(
 	}
 	plat := NewPlatform(id, name, regexFilters, regionFilters)
 	plat.StickyTTLNs = stickyTTLNs
+	plat.StickyTTLSliding = stickyTTLSliding
 	plat.ReverseProxyMissAction = missAction
 	plat.ReverseProxyEmptyAccountBehavior = emptyAccountBehavior
 	plat.ReverseProxyFixedAccountHeader = normalizedFixedHeaders
@@ -119,6 +121,7 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		regexFilters,
 		append([]string(nil), mp.RegionFilters...),
 		mp.StickyTTLNs,
+		mp.StickyTTLSliding,
 		string(missAction),
 		emptyAccountBehavior,
 		fixedHeader,

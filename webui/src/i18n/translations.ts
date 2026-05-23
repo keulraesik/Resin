@@ -543,6 +543,12 @@ const EXACT_ZH_TO_EN: Record<string, string> = {
   "禁用请求失败熔断": "Disable request failure circuit breaker",
   "开启后，此平台的代理请求失败不会增加节点熔断计数；主动探测不受影响。":
     "When enabled, proxy request failures from this platform do not increase node circuit-breaker counts; active probes are unchanged.",
+  "租约过期": "Lease expiry",
+  "滑动": "Sliding",
+  "固定": "Fixed",
+  "滑动过期": "Sliding expiry",
+  "开启后，同一账号持续访问会刷新租约到期时间；关闭时租约按创建时间固定到期。":
+    "When enabled, continued access by the same account refreshes lease expiry; when disabled, leases expire from creation time.",
   "请求日志详情": "Request log details",
   "请选择要编辑的订阅": "Please select a subscription to edit",
   "删除后该规则将不再生效。": "After deletion, this rule will no longer take effect.",

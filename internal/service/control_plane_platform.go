@@ -25,6 +25,7 @@ type PlatformResponse struct {
 	ID                               string   `json:"id"`
 	Name                             string   `json:"name"`
 	StickyTTL                        string   `json:"sticky_ttl"`
+	StickyTTLSliding                 bool     `json:"sticky_ttl_sliding"`
 	RegexFilters                     []string `json:"regex_filters"`
 	RegionFilters                    []string `json:"region_filters"`
 	RoutableNodeCount                int      `json:"routable_node_count"`
@@ -43,6 +44,7 @@ func platformToResponse(p model.Platform) PlatformResponse {
 		ID:                               p.ID,
 		Name:                             p.Name,
 		StickyTTL:                        time.Duration(p.StickyTTLNs).String(),
+		StickyTTLSliding:                 p.StickyTTLSliding,
 		RegexFilters:                     append([]string(nil), p.RegexFilters...),
 		RegionFilters:                    append([]string(nil), p.RegionFilters...),
 		RoutableNodeCount:                0,
@@ -70,6 +72,7 @@ func (s *ControlPlaneService) withRoutableNodeCount(resp PlatformResponse) Platf
 type platformConfig struct {
 	Name                             string
 	StickyTTLNs                      int64
+	StickyTTLSliding                 bool
 	RegexFilters                     []string
 	RegionFilters                    []string
 	ReverseProxyMissAction           string
@@ -98,6 +101,7 @@ func (s *ControlPlaneService) defaultPlatformConfig(name string) platformConfig 
 	return platformConfig{
 		Name:                   name,
 		StickyTTLNs:            int64(s.EnvCfg.DefaultPlatformStickyTTL),
+		StickyTTLSliding:       false,
 		RegexFilters:           append([]string(nil), s.EnvCfg.DefaultPlatformRegexFilters...),
 		RegionFilters:          append([]string(nil), s.EnvCfg.DefaultPlatformRegionFilters...),
 		ReverseProxyMissAction: s.EnvCfg.DefaultPlatformReverseProxyMissAction,
@@ -115,6 +119,7 @@ func platformConfigFromModel(mp model.Platform) platformConfig {
 	return platformConfig{
 		Name:                             mp.Name,
 		StickyTTLNs:                      mp.StickyTTLNs,
+		StickyTTLSliding:                 mp.StickyTTLSliding,
 		RegexFilters:                     append([]string(nil), mp.RegexFilters...),
 		RegionFilters:                    append([]string(nil), mp.RegionFilters...),
 		ReverseProxyMissAction:           mp.ReverseProxyMissAction,
@@ -130,6 +135,7 @@ func (cfg platformConfig) toModel(id string, updatedAtNs int64) model.Platform {
 		ID:                               id,
 		Name:                             cfg.Name,
 		StickyTTLNs:                      cfg.StickyTTLNs,
+		StickyTTLSliding:                 cfg.StickyTTLSliding,
 		RegexFilters:                     append([]string(nil), cfg.RegexFilters...),
 		RegionFilters:                    append([]string(nil), cfg.RegionFilters...),
 		ReverseProxyMissAction:           cfg.ReverseProxyMissAction,
@@ -152,6 +158,7 @@ func (cfg platformConfig) toRuntime(id string) (*platform.Platform, error) {
 		compiledRegexFilters,
 		cfg.RegionFilters,
 		cfg.StickyTTLNs,
+		cfg.StickyTTLSliding,
 		cfg.ReverseProxyMissAction,
 		cfg.ReverseProxyEmptyAccountBehavior,
 		cfg.ReverseProxyFixedAccountHeader,
@@ -328,6 +335,7 @@ func (s *ControlPlaneService) GetPlatform(id string) (*PlatformResponse, error) 
 type CreatePlatformRequest struct {
 	Name                             *string  `json:"name"`
 	StickyTTL                        *string  `json:"sticky_ttl"`
+	StickyTTLSliding                 *bool    `json:"sticky_ttl_sliding"`
 	RegexFilters                     []string `json:"regex_filters"`
 	RegionFilters                    []string `json:"region_filters"`
 	ReverseProxyMissAction           *string  `json:"reverse_proxy_miss_action"`
@@ -364,6 +372,9 @@ func (s *ControlPlaneService) CreatePlatform(req CreatePlatformRequest) (*Platfo
 		if err := setPlatformStickyTTL(&cfg, d); err != nil {
 			return nil, err
 		}
+	}
+	if req.StickyTTLSliding != nil {
+		cfg.StickyTTLSliding = *req.StickyTTLSliding
 	}
 	if req.RegexFilters != nil {
 		cfg.RegexFilters = req.RegexFilters
@@ -461,6 +472,11 @@ func (s *ControlPlaneService) UpdatePlatform(id string, patchJSON json.RawMessag
 		if err := setPlatformStickyTTL(&cfg, d); err != nil {
 			return nil, err
 		}
+	}
+	if sliding, ok, err := patch.optionalBool("sticky_ttl_sliding"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.StickyTTLSliding = sliding
 	}
 
 	if filters, ok, err := patch.optionalStringSlice("regex_filters"); err != nil {

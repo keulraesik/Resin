@@ -1,0 +1,2 @@
+ALTER TABLE platforms
+ADD COLUMN sticky_ttl_sliding INTEGER NOT NULL DEFAULT 0;

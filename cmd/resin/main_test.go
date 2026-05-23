@@ -107,6 +107,9 @@ func TestBootstrapTopology_CreatesDefaultPlatformWhenMissing(t *testing.T) {
 	if defaultPlat.StickyTTLNs != int64(2*time.Hour) {
 		t.Fatalf("sticky_ttl_ns: got %d, want %d", defaultPlat.StickyTTLNs, int64(2*time.Hour))
 	}
+	if defaultPlat.StickyTTLSliding {
+		t.Fatal("sticky_ttl_sliding: got true, want false")
+	}
 	if defaultPlat.ReverseProxyMissAction != "REJECT" {
 		t.Fatalf("reverse_proxy_miss_action: got %q, want %q", defaultPlat.ReverseProxyMissAction, "REJECT")
 	}
