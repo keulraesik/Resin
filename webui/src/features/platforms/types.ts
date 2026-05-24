@@ -9,6 +9,7 @@ export type Platform = {
   sticky_ttl_sliding: boolean;
   regex_filters: string[];
   region_filters: string[];
+  region_failover_order: string[];
   routable_node_count: number;
   reverse_proxy_miss_action: PlatformMissAction;
   reverse_proxy_empty_account_behavior: PlatformEmptyAccountBehavior;
@@ -31,6 +32,7 @@ export type PlatformCreateInput = {
   sticky_ttl_sliding?: boolean;
   regex_filters?: string[];
   region_filters?: string[];
+  region_failover_order?: string[];
   reverse_proxy_miss_action?: PlatformMissAction;
   reverse_proxy_empty_account_behavior?: PlatformEmptyAccountBehavior;
   reverse_proxy_fixed_account_header?: string;
@@ -44,9 +46,18 @@ export type PlatformUpdateInput = {
   sticky_ttl_sliding?: boolean;
   regex_filters?: string[];
   region_filters?: string[];
+  region_failover_order?: string[];
   reverse_proxy_miss_action?: PlatformMissAction;
   reverse_proxy_empty_account_behavior?: PlatformEmptyAccountBehavior;
   reverse_proxy_fixed_account_header?: string;
   allocation_policy?: PlatformAllocationPolicy;
   passive_circuit_breaker_disabled?: boolean;
+};
+
+export type AccountRegion = {
+  platform_id: string;
+  account: string;
+  primary_region: string;
+  created_at: string;
+  updated_at: string;
 };

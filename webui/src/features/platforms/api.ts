@@ -1,11 +1,12 @@
 import { apiRequest } from "../../lib/api-client";
-import type { PageResponse, Platform, PlatformCreateInput, PlatformUpdateInput } from "./types";
+import type { AccountRegion, PageResponse, Platform, PlatformCreateInput, PlatformUpdateInput } from "./types";
 
 const basePath = "/api/v1/platforms";
 
-type ApiPlatform = Omit<Platform, "regex_filters" | "region_filters"> & {
+type ApiPlatform = Omit<Platform, "regex_filters" | "region_filters" | "region_failover_order"> & {
   regex_filters?: string[] | null;
   region_filters?: string[] | null;
+  region_failover_order?: string[] | null;
   routable_node_count?: number | null;
   sticky_ttl_sliding?: boolean | null;
   reverse_proxy_miss_action?: Platform["reverse_proxy_miss_action"] | null;
@@ -27,6 +28,7 @@ function normalizePlatform(raw: ApiPlatform): Platform {
     reverse_proxy_miss_action: parseMissAction(raw.reverse_proxy_miss_action),
     regex_filters: Array.isArray(raw.regex_filters) ? raw.regex_filters : [],
     region_filters: Array.isArray(raw.region_filters) ? raw.region_filters : [],
+    region_failover_order: Array.isArray(raw.region_failover_order) ? raw.region_failover_order : [],
     routable_node_count: typeof raw.routable_node_count === "number" ? raw.routable_node_count : 0,
     sticky_ttl_sliding: typeof raw.sticky_ttl_sliding === "boolean" ? raw.sticky_ttl_sliding : false,
     reverse_proxy_empty_account_behavior:
@@ -113,6 +115,22 @@ export async function rebuildPlatform(id: string): Promise<void> {
 
 export async function clearAllPlatformLeases(id: string): Promise<void> {
   await apiRequest<void>(`${basePath}/${id}/leases`, {
+    method: "DELETE",
+  });
+}
+
+export async function listAccountRegions(id: string): Promise<PageResponse<AccountRegion>> {
+  return apiRequest<PageResponse<AccountRegion>>(`${basePath}/${id}/account-regions?limit=1000`);
+}
+
+export async function deleteAccountRegion(id: string, account: string): Promise<void> {
+  await apiRequest<void>(`${basePath}/${id}/account-regions/${encodeURIComponent(account)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function clearAllAccountRegions(id: string): Promise<{ deleted_count: number }> {
+  return apiRequest<{ deleted_count: number }>(`${basePath}/${id}/account-regions`, {
     method: "DELETE",
   });
 }

@@ -176,6 +176,7 @@ export function PlatformPage() {
         <div className="platform-card-grid">
           {platforms.map((platform) => {
             const regionCount = platform.region_filters.length;
+            const failoverCount = platform.region_failover_order.length;
             const regexCount = platform.regex_filters.length;
             const stickyTTL = formatGoDuration(platform.sticky_ttl, t("默认"));
 
@@ -196,6 +197,10 @@ export function PlatformPage() {
                   <span className="platform-fact">
                     <span>{t("区域")}</span>
                     <strong>{regionCount}</strong>
+                  </span>
+                  <span className="platform-fact">
+                    <span>{t("Region 回退")}</span>
+                    <strong>{failoverCount}</strong>
                   </span>
                   <span className="platform-fact">
                     <span>{t("正则")}</span>
@@ -399,6 +404,29 @@ export function PlatformPage() {
                 />
                 <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
                   {t("支持反选：以 ! 开头可排除地区（如 !hk）。可与正选混用，最终结果为“先正选再排除”。")}
+                </p>
+              </div>
+
+              <div className="field-group">
+                <label className="field-label field-label-with-info" htmlFor="create-region-failover">
+                  <span>{t("Region 回退顺序（可选）")}</span>
+                  <span
+                    className="subscription-info-icon"
+                    title={t("Sticky 账号无同 IP 可用时，先尝试账号主 Region，再按这里的顺序寻找可用节点。")}
+                    aria-label={t("Sticky 账号无同 IP 可用时，先尝试账号主 Region，再按这里的顺序寻找可用节点。")}
+                    tabIndex={0}
+                  >
+                    <Info size={13} />
+                  </span>
+                </label>
+                <Textarea
+                  id="create-region-failover"
+                  rows={4}
+                  placeholder={t("每行一条，如 us / jp / sg")}
+                  {...createForm.register("region_failover_order_text")}
+                />
+                <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                  {t("仅支持正向地区代码，不支持 ! 反选；顺序越靠前优先级越高。")}
                 </p>
               </div>
 

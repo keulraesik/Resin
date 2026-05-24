@@ -34,6 +34,7 @@ export const platformFormSchema = z.object({
   sticky_ttl_sliding: z.boolean(),
   regex_filters_text: z.string().optional(),
   region_filters_text: z.string().optional(),
+  region_failover_order_text: z.string().optional(),
   reverse_proxy_miss_action: z.enum(missActions),
   reverse_proxy_empty_account_behavior: z.enum(emptyAccountBehaviors),
   reverse_proxy_fixed_account_header: z.string().optional(),
@@ -60,6 +61,7 @@ export const defaultPlatformFormValues: PlatformFormValues = {
   sticky_ttl_sliding: false,
   regex_filters_text: "",
   region_filters_text: "",
+  region_failover_order_text: "",
   reverse_proxy_miss_action: "TREAT_AS_EMPTY",
   reverse_proxy_empty_account_behavior: "RANDOM",
   reverse_proxy_fixed_account_header: "Authorization",
@@ -70,6 +72,7 @@ export const defaultPlatformFormValues: PlatformFormValues = {
 export function platformToFormValues(platform: Platform): PlatformFormValues {
   const regexFilters = Array.isArray(platform.regex_filters) ? platform.regex_filters : [];
   const regionFilters = Array.isArray(platform.region_filters) ? platform.region_filters : [];
+  const regionFailoverOrder = Array.isArray(platform.region_failover_order) ? platform.region_failover_order : [];
 
   return {
     name: platform.name,
@@ -77,6 +80,7 @@ export function platformToFormValues(platform: Platform): PlatformFormValues {
     sticky_ttl_sliding: platform.sticky_ttl_sliding,
     regex_filters_text: regexFilters.join("\n"),
     region_filters_text: regionFilters.join("\n"),
+    region_failover_order_text: regionFailoverOrder.join("\n"),
     reverse_proxy_miss_action: platform.reverse_proxy_miss_action,
     reverse_proxy_empty_account_behavior: platform.reverse_proxy_empty_account_behavior,
     reverse_proxy_fixed_account_header: platform.reverse_proxy_fixed_account_header,
@@ -91,6 +95,7 @@ function toPlatformPayloadBase(values: PlatformFormValues) {
     sticky_ttl_sliding: values.sticky_ttl_sliding,
     regex_filters: parseLinesToList(values.regex_filters_text),
     region_filters: parseLinesToList(values.region_filters_text, (value) => value.toLowerCase()),
+    region_failover_order: parseLinesToList(values.region_failover_order_text, (value) => value.toLowerCase()),
     reverse_proxy_miss_action: values.reverse_proxy_miss_action,
     reverse_proxy_empty_account_behavior: values.reverse_proxy_empty_account_behavior,
     reverse_proxy_fixed_account_header: parseHeaderLines(values.reverse_proxy_fixed_account_header).join("\n"),

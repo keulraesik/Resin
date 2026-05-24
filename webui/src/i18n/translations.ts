@@ -549,6 +549,25 @@ const EXACT_ZH_TO_EN: Record<string, string> = {
   "滑动过期": "Sliding expiry",
   "开启后，同一账号持续访问会刷新租约到期时间；关闭时租约按创建时间固定到期。":
     "When enabled, continued access by the same account refreshes lease expiry; when disabled, leases expire from creation time.",
+  "Region 回退": "Region failover",
+  "Region 回退顺序": "Region failover order",
+  "Region 回退顺序（可选）": "Region failover order (optional)",
+  "每行一条，如 us / jp / sg": "One per line, e.g. us / jp / sg",
+  "Sticky 账号无同 IP 可用时，先尝试账号主 Region，再按这里的顺序寻找可用节点。":
+    "When a sticky account has no same-IP node available, try its primary region first, then follow this order.",
+  "仅支持正向地区代码，不支持 ! 反选；顺序越靠前优先级越高。":
+    "Only positive region codes are supported; ! exclusions are not allowed. Earlier entries have higher priority.",
+  "账号 Region 亲和": "Account Region Affinity",
+  "查看 sticky 账号首次固定的主 Region，可单条清除或全部清除。":
+    "View the primary Region first fixed for sticky accounts; clear one row or all rows.",
+  "正在加载账号 Region...": "Loading account Regions...",
+  "暂无账号 Region 亲和记录": "No account Region affinity records",
+  "清除所有账号 Region": "Clear all account Regions",
+  "账号 Region 已清除": "Account Region cleared",
+  "已清除 {{count}} 条账号 Region": "Cleared {{count}} account Region records",
+  "确认清除账号 {{account}} 的 Region 亲和？": "Clear Region affinity for account {{account}}?",
+  "确认清除平台 {{name}} 的所有账号 Region 亲和？":
+    "Clear all account Region affinity records for platform {{name}}?",
   "请求日志详情": "Request log details",
   "请选择要编辑的订阅": "Please select a subscription to edit",
   "删除后该规则将不再生效。": "After deletion, this rule will no longer take effect.",

@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Info, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Info, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
@@ -16,7 +16,16 @@ import { useToast } from "../../hooks/useToast";
 import { useI18n } from "../../i18n";
 import { formatApiErrorMessage } from "../../lib/error-message";
 import { formatGoDuration, formatRelativeTime } from "../../lib/time";
-import { clearAllPlatformLeases, deletePlatform, getPlatform, resetPlatform, updatePlatform } from "./api";
+import {
+  clearAllAccountRegions,
+  clearAllPlatformLeases,
+  deleteAccountRegion,
+  deletePlatform,
+  getPlatform,
+  listAccountRegions,
+  resetPlatform,
+  updatePlatform,
+} from "./api";
 import {
   allocationPolicies,
   allocationPolicyLabel,
@@ -68,6 +77,15 @@ export function PlatformDetailPage() {
   });
 
   const platform = platformQuery.data ?? null;
+
+  const accountRegionsQuery = useQuery({
+    queryKey: ["platform-account-regions", platformId],
+    queryFn: () => listAccountRegions(platformId),
+    enabled: Boolean(platformId),
+    refetchInterval: 30_000,
+    placeholderData: (previous) => previous,
+  });
+  const accountRegions = accountRegionsQuery.data?.items ?? [];
 
   const editForm = useForm<PlatformFormValues>({
     resolver: zodResolver(platformFormSchema),
@@ -141,6 +159,39 @@ export function PlatformDetailPage() {
     },
   });
 
+  const deleteAccountRegionMutation = useMutation({
+    mutationFn: async (account: string) => {
+      if (!platform) {
+        throw new Error("平台不存在或已被删除");
+      }
+      await deleteAccountRegion(platform.id, account);
+      return account;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["platform-account-regions", platformId] });
+      showToast("success", t("账号 Region 已清除"));
+    },
+    onError: (error) => {
+      showToast("error", formatApiErrorMessage(error, t));
+    },
+  });
+
+  const clearAccountRegionsMutation = useMutation({
+    mutationFn: async () => {
+      if (!platform) {
+        throw new Error("平台不存在或已被删除");
+      }
+      return clearAllAccountRegions(platform.id);
+    },
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: ["platform-account-regions", platformId] });
+      showToast("success", t("已清除 {{count}} 条账号 Region", { count: result.deleted_count }));
+    },
+    onError: (error) => {
+      showToast("error", formatApiErrorMessage(error, t));
+    },
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!platform) {
@@ -188,8 +239,28 @@ export function PlatformDetailPage() {
     await clearLeasesMutation.mutateAsync();
   };
 
+  const handleDeleteAccountRegion = async (account: string) => {
+    const confirmed = window.confirm(t("确认清除账号 {{account}} 的 Region 亲和？", { account }));
+    if (!confirmed) {
+      return;
+    }
+    await deleteAccountRegionMutation.mutateAsync(account);
+  };
+
+  const handleClearAllAccountRegions = async () => {
+    if (!platform) {
+      return;
+    }
+    const confirmed = window.confirm(t("确认清除平台 {{name}} 的所有账号 Region 亲和？", { name: platform.name }));
+    if (!confirmed) {
+      return;
+    }
+    await clearAccountRegionsMutation.mutateAsync();
+  };
+
   const stickyTTL = platform ? formatGoDuration(platform.sticky_ttl, t("默认")) : t("默认");
   const regionCount = platform?.region_filters.length ?? 0;
+  const failoverCount = platform?.region_failover_order.length ?? 0;
   const regexCount = platform?.regex_filters.length ?? 0;
   const deleteDisabled = !platform || platform.id === ZERO_UUID || deleteMutation.isPending;
 
@@ -254,6 +325,10 @@ export function PlatformDetailPage() {
                 <span className="platform-fact">
                   <span>{t("区域")}</span>
                   <strong>{regionCount}</strong>
+                </span>
+                <span className="platform-fact">
+                  <span>{t("Region 回退")}</span>
+                  <strong>{failoverCount}</strong>
                 </span>
                 <span className="platform-fact">
                   <span>{t("正则")}</span>
@@ -495,6 +570,29 @@ export function PlatformDetailPage() {
                     </p>
                   </div>
 
+                  <div className="field-group">
+                    <label className="field-label field-label-with-info" htmlFor="detail-edit-region-failover">
+                      <span>{t("Region 回退顺序")}</span>
+                      <span
+                        className="subscription-info-icon"
+                        title={t("Sticky 账号无同 IP 可用时，先尝试账号主 Region，再按这里的顺序寻找可用节点。")}
+                        aria-label={t("Sticky 账号无同 IP 可用时，先尝试账号主 Region，再按这里的顺序寻找可用节点。")}
+                        tabIndex={0}
+                      >
+                        <Info size={13} />
+                      </span>
+                    </label>
+                    <Textarea
+                      id="detail-edit-region-failover"
+                      rows={4}
+                      placeholder={t("每行一条，如 us / jp / sg")}
+                      {...editForm.register("region_failover_order_text")}
+                    />
+                    <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                      {t("仅支持正向地区代码，不支持 ! 反选；顺序越靠前优先级越高。")}
+                    </p>
+                  </div>
+
                   <div className="platform-config-actions">
                     <Button type="submit" disabled={updateMutation.isPending}>
                       {updateMutation.isPending ? t("保存中...") : t("保存配置")}
@@ -517,6 +615,59 @@ export function PlatformDetailPage() {
                 </div>
 
                 <div className="platform-ops-list">
+                  <div className="platform-op-item">
+                    <div className="platform-op-copy">
+                      <h5>{t("账号 Region 亲和")}</h5>
+                      <p className="platform-op-hint">{t("查看 sticky 账号首次固定的主 Region，可单条清除或全部清除。")}</p>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      onClick={() => accountRegionsQuery.refetch()}
+                      disabled={accountRegionsQuery.isFetching}
+                    >
+                      {accountRegionsQuery.isFetching ? t("刷新中...") : t("刷新")}
+                    </Button>
+                  </div>
+
+                  <div className="platform-account-region-list">
+                    {accountRegionsQuery.isLoading ? <p className="muted">{t("正在加载账号 Region...")}</p> : null}
+                    {accountRegionsQuery.isError ? (
+                      <div className="callout callout-error">
+                        <AlertTriangle size={14} />
+                        <span>{formatApiErrorMessage(accountRegionsQuery.error, t)}</span>
+                      </div>
+                    ) : null}
+                    {!accountRegionsQuery.isLoading && accountRegions.length === 0 ? (
+                      <p className="muted">{t("暂无账号 Region 亲和记录")}</p>
+                    ) : null}
+                    {accountRegions.map((item) => (
+                      <div key={`${item.platform_id}:${item.account}`} className="platform-account-region-row">
+                        <div>
+                          <strong>{item.account}</strong>
+                          <span>{item.primary_region.toUpperCase()}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void handleDeleteAccountRegion(item.account)}
+                          disabled={deleteAccountRegionMutation.isPending}
+                          title={t("清除")}
+                        >
+                          <Trash2 size={15} />
+                        </Button>
+                      </div>
+                    ))}
+                    {accountRegions.length > 0 ? (
+                      <Button
+                        variant="danger"
+                        onClick={() => void handleClearAllAccountRegions()}
+                        disabled={clearAccountRegionsMutation.isPending}
+                      >
+                        {clearAccountRegionsMutation.isPending ? t("清除中...") : t("清除所有账号 Region")}
+                      </Button>
+                    ) : null}
+                  </div>
+
                   <div className="platform-op-item">
                     <div className="platform-op-copy">
                       <h5>{t("重置为默认配置")}</h5>

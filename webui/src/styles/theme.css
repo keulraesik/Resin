@@ -2668,6 +2668,53 @@ a {
   flex-shrink: 0;
 }
 
+.platform-account-region-list {
+  border: 1px solid rgba(37, 72, 120, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.platform-account-region-row {
+  min-height: 40px;
+  border: 1px solid rgba(37, 72, 120, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.platform-account-region-row > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.platform-account-region-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.platform-account-region-row span {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(32, 104, 246, 0.1);
+  color: #174ea6;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 @keyframes drawer-in {
   from {
     opacity: 0;
@@ -2801,6 +2848,14 @@ a {
 
   .platform-op-item .btn {
     width: 100%;
+  }
+
+  .platform-account-region-row {
+    align-items: stretch;
+  }
+
+  .platform-account-region-row .btn {
+    width: 40px;
   }
 
   .platform-monitor-kpi-grid {
