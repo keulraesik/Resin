@@ -8,3 +8,5 @@ webui/dist
 .vscode
 *.log
 .data/
+.dev/
+data/
