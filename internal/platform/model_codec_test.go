@@ -15,6 +15,7 @@ func TestBuildFromModel_Success(t *testing.T) {
 		StickyTTLNs:                      3600,
 		RegexFilters:                     []string{`^us-.*$`},
 		RegionFilters:                    []string{"us", "jp"},
+		RegionFailoverOrder:              []string{"us", "sg"},
 		ReverseProxyMissAction:           "REJECT",
 		ReverseProxyEmptyAccountBehavior: "FIXED_HEADER",
 		ReverseProxyFixedAccountHeader:   "x-account-id",
@@ -66,6 +67,9 @@ func TestBuildFromModel_Success(t *testing.T) {
 	if len(plat.RegionFilters) != 2 || plat.RegionFilters[0] != "us" || plat.RegionFilters[1] != "jp" {
 		t.Fatalf("region filters mismatch: %+v", plat.RegionFilters)
 	}
+	if len(plat.RegionFailoverOrder) != 2 || plat.RegionFailoverOrder[0] != "us" || plat.RegionFailoverOrder[1] != "sg" {
+		t.Fatalf("region failover order mismatch: %+v", plat.RegionFailoverOrder)
+	}
 }
 
 func TestBuildFromModel_InvalidRegex(t *testing.T) {
@@ -91,6 +95,21 @@ func TestBuildFromModel_InvalidRegionFilters(t *testing.T) {
 		t.Fatal("expected region decode error")
 	}
 	if !strings.Contains(err.Error(), "region_filters[0]") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildFromModel_InvalidRegionFailoverOrder(t *testing.T) {
+	_, err := BuildFromModel(model.Platform{
+		ID:                  "plat-1",
+		RegexFilters:        []string{},
+		RegionFilters:       []string{},
+		RegionFailoverOrder: []string{"!us"},
+	})
+	if err == nil {
+		t.Fatal("expected region failover decode error")
+	}
+	if !strings.Contains(err.Error(), "region_failover_order[0]") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -199,5 +218,18 @@ func TestValidateRegionFilters_Invalid(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "region_filters[0]") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRegionFailoverOrder_Invalid(t *testing.T) {
+	tests := [][]string{
+		{"US"},
+		{"!us"},
+		{"us", "us"},
+	}
+	for _, tc := range tests {
+		if err := ValidateRegionFailoverOrder(tc); err == nil {
+			t.Fatalf("expected validation error for %v", tc)
+		}
 	}
 }

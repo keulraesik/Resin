@@ -29,8 +29,9 @@ type Platform struct {
 	Name string
 
 	// Filter configuration.
-	RegexFilters  []*regexp.Regexp
-	RegionFilters []string // lowercase ISO codes, supports negation "!xx"
+	RegexFilters        []*regexp.Regexp
+	RegionFilters       []string // lowercase ISO codes, supports negation "!xx"
+	RegionFailoverOrder []string // lowercase ISO codes, strict sticky failover priority
 
 	// Other config fields.
 	StickyTTLNs                      int64

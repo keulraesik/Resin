@@ -30,6 +30,21 @@ func ValidateRegionFilters(regionFilters []string) error {
 	return nil
 }
 
+// ValidateRegionFailoverOrder validates strict region priority entries.
+func ValidateRegionFailoverOrder(regions []string) error {
+	seen := map[string]struct{}{}
+	for i, r := range regions {
+		if !isLowerAlpha2(r) {
+			return fmt.Errorf("region_failover_order[%d]: must be a 2-letter lowercase ISO 3166-1 alpha-2 code (e.g. us, jp)", i)
+		}
+		if _, exists := seen[r]; exists {
+			return fmt.Errorf("region_failover_order[%d]: duplicate region %q", i, r)
+		}
+		seen[r] = struct{}{}
+	}
+	return nil
+}
+
 // CompileRegexFilters compiles regex filters in order.
 func CompileRegexFilters(regexFilters []string) ([]*regexp.Regexp, error) {
 	compiled := make([]*regexp.Regexp, 0, len(regexFilters))
@@ -48,6 +63,7 @@ func NewConfiguredPlatform(
 	id, name string,
 	regexFilters []*regexp.Regexp,
 	regionFilters []string,
+	regionFailoverOrder []string,
 	stickyTTLNs int64,
 	stickyTTLSliding bool,
 	missAction string,
@@ -62,6 +78,7 @@ func NewConfiguredPlatform(
 		fixedHeaders = nil
 	}
 	plat := NewPlatform(id, name, regexFilters, regionFilters)
+	plat.RegionFailoverOrder = append([]string(nil), regionFailoverOrder...)
 	plat.StickyTTLNs = stickyTTLNs
 	plat.StickyTTLSliding = stickyTTLSliding
 	plat.ReverseProxyMissAction = missAction
@@ -89,6 +106,9 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		return nil, err
 	}
 	if err := ValidateRegionFilters(mp.RegionFilters); err != nil {
+		return nil, err
+	}
+	if err := ValidateRegionFailoverOrder(mp.RegionFailoverOrder); err != nil {
 		return nil, err
 	}
 	emptyAccountBehavior := mp.ReverseProxyEmptyAccountBehavior
@@ -120,6 +140,7 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		mp.Name,
 		regexFilters,
 		append([]string(nil), mp.RegionFilters...),
+		append([]string(nil), mp.RegionFailoverOrder...),
 		mp.StickyTTLNs,
 		mp.StickyTTLSliding,
 		string(missAction),

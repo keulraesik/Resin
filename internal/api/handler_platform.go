@@ -22,6 +22,11 @@ func platformMatchesKeyword(p service.PlatformResponse, keyword string) bool {
 			return true
 		}
 	}
+	for _, item := range p.RegionFailoverOrder {
+		if contains(item) {
+			return true
+		}
+	}
 	return false
 }
 

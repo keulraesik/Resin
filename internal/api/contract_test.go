@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -1116,6 +1117,88 @@ func TestAPIContract_SystemConfigPatchSemantics(t *testing.T) {
 			}
 			assertErrorCode(t, r, "INVALID_ARGUMENT")
 		})
+	}
+}
+
+func TestAPIContract_PlatformRegionFailoverOrder(t *testing.T) {
+	srv, _, _ := newControlPlaneTestServer(t)
+
+	rec := doJSONRequest(t, srv, http.MethodPost, "/api/v1/platforms", map[string]any{
+		"name":                  "region-failover-order",
+		"region_failover_order": []string{"us", "jp"},
+	}, true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status: got %d, want %d, body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	body := decodeJSONMap(t, rec)
+	if got := fmt.Sprint(body["region_failover_order"]); got != "[us jp]" {
+		t.Fatalf("create region_failover_order: got %v, want [us jp]", body["region_failover_order"])
+	}
+	platformID, _ := body["id"].(string)
+
+	rec = doJSONRequest(t, srv, http.MethodPatch, "/api/v1/platforms/"+platformID, map[string]any{
+		"region_failover_order": []string{"sg"},
+	}, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status: got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body = decodeJSONMap(t, rec)
+	if got := fmt.Sprint(body["region_failover_order"]); got != "[sg]" {
+		t.Fatalf("patch region_failover_order: got %v, want [sg]", body["region_failover_order"])
+	}
+
+	rec = doJSONRequest(t, srv, http.MethodPatch, "/api/v1/platforms/"+platformID, map[string]any{
+		"region_failover_order": []string{"!us"},
+	}, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid patch status: got %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	assertErrorCode(t, rec, "INVALID_ARGUMENT")
+}
+
+func TestAPIContract_PlatformAccountRegions(t *testing.T) {
+	srv, cp, _ := newControlPlaneTestServer(t)
+	platformID := mustCreatePlatform(t, srv, "account-region-api")
+	now := time.Now().UnixNano()
+	if _, err := cp.Engine.EnsureAccountRegion(model.AccountRegion{
+		PlatformID:    platformID,
+		Account:       "acct-1",
+		PrimaryRegion: "us",
+		CreatedAtNs:   now,
+		UpdatedAtNs:   now,
+	}); err != nil {
+		t.Fatalf("EnsureAccountRegion: %v", err)
+	}
+
+	rec := doJSONRequest(t, srv, http.MethodGet, "/api/v1/platforms/"+platformID+"/account-regions", nil, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status: got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := decodeJSONMap(t, rec)
+	items, ok := body["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("list items: got %T len=%d body=%s", body["items"], len(items), rec.Body.String())
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("list item type: got %T", items[0])
+	}
+	if item["account"] != "acct-1" || item["primary_region"] != "us" {
+		t.Fatalf("unexpected account region item: %+v", item)
+	}
+
+	rec = doJSONRequest(t, srv, http.MethodDelete, "/api/v1/platforms/"+platformID+"/account-regions/acct-1", nil, true)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete one status: got %d, want %d, body=%s", rec.Code, http.StatusNoContent, rec.Body.String())
+	}
+	rec = doJSONRequest(t, srv, http.MethodGet, "/api/v1/platforms/"+platformID+"/account-regions", nil, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list after delete status: got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body = decodeJSONMap(t, rec)
+	items, ok = body["items"].([]any)
+	if !ok || len(items) != 0 {
+		t.Fatalf("expected empty items after delete, got %v body=%s", body["items"], rec.Body.String())
 	}
 }
 

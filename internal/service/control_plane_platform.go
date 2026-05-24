@@ -28,6 +28,7 @@ type PlatformResponse struct {
 	StickyTTLSliding                 bool     `json:"sticky_ttl_sliding"`
 	RegexFilters                     []string `json:"regex_filters"`
 	RegionFilters                    []string `json:"region_filters"`
+	RegionFailoverOrder              []string `json:"region_failover_order"`
 	RoutableNodeCount                int      `json:"routable_node_count"`
 	ReverseProxyMissAction           string   `json:"reverse_proxy_miss_action"`
 	ReverseProxyEmptyAccountBehavior string   `json:"reverse_proxy_empty_account_behavior"`
@@ -47,6 +48,7 @@ func platformToResponse(p model.Platform) PlatformResponse {
 		StickyTTLSliding:                 p.StickyTTLSliding,
 		RegexFilters:                     append([]string(nil), p.RegexFilters...),
 		RegionFilters:                    append([]string(nil), p.RegionFilters...),
+		RegionFailoverOrder:              append([]string(nil), p.RegionFailoverOrder...),
 		RoutableNodeCount:                0,
 		ReverseProxyMissAction:           p.ReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: behavior,
@@ -75,6 +77,7 @@ type platformConfig struct {
 	StickyTTLSliding                 bool
 	RegexFilters                     []string
 	RegionFilters                    []string
+	RegionFailoverOrder              []string
 	ReverseProxyMissAction           string
 	ReverseProxyEmptyAccountBehavior string
 	ReverseProxyFixedAccountHeader   string
@@ -104,6 +107,7 @@ func (s *ControlPlaneService) defaultPlatformConfig(name string) platformConfig 
 		StickyTTLSliding:       false,
 		RegexFilters:           append([]string(nil), s.EnvCfg.DefaultPlatformRegexFilters...),
 		RegionFilters:          append([]string(nil), s.EnvCfg.DefaultPlatformRegionFilters...),
+		RegionFailoverOrder:    []string{},
 		ReverseProxyMissAction: s.EnvCfg.DefaultPlatformReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: normalizePlatformEmptyAccountBehavior(
 			s.EnvCfg.DefaultPlatformReverseProxyEmptyAccountBehavior,
@@ -122,6 +126,7 @@ func platformConfigFromModel(mp model.Platform) platformConfig {
 		StickyTTLSliding:                 mp.StickyTTLSliding,
 		RegexFilters:                     append([]string(nil), mp.RegexFilters...),
 		RegionFilters:                    append([]string(nil), mp.RegionFilters...),
+		RegionFailoverOrder:              append([]string(nil), mp.RegionFailoverOrder...),
 		ReverseProxyMissAction:           mp.ReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: normalizePlatformEmptyAccountBehavior(mp.ReverseProxyEmptyAccountBehavior),
 		ReverseProxyFixedAccountHeader:   normalizeHeaderFieldName(mp.ReverseProxyFixedAccountHeader),
@@ -138,6 +143,7 @@ func (cfg platformConfig) toModel(id string, updatedAtNs int64) model.Platform {
 		StickyTTLSliding:                 cfg.StickyTTLSliding,
 		RegexFilters:                     append([]string(nil), cfg.RegexFilters...),
 		RegionFilters:                    append([]string(nil), cfg.RegionFilters...),
+		RegionFailoverOrder:              append([]string(nil), cfg.RegionFailoverOrder...),
 		ReverseProxyMissAction:           cfg.ReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: cfg.ReverseProxyEmptyAccountBehavior,
 		ReverseProxyFixedAccountHeader:   cfg.ReverseProxyFixedAccountHeader,
@@ -157,6 +163,7 @@ func (cfg platformConfig) toRuntime(id string) (*platform.Platform, error) {
 		cfg.Name,
 		compiledRegexFilters,
 		cfg.RegionFilters,
+		cfg.RegionFailoverOrder,
 		cfg.StickyTTLNs,
 		cfg.StickyTTLSliding,
 		cfg.ReverseProxyMissAction,
@@ -269,6 +276,9 @@ func validatePlatformConfig(cfg *platformConfig, validateRegionFilters bool) *Se
 			return invalidArg(err.Error())
 		}
 	}
+	if err := platform.ValidateRegionFailoverOrder(cfg.RegionFailoverOrder); err != nil {
+		return invalidArg(err.Error())
+	}
 	if err := validatePlatformEmptyAccountConfig(cfg); err != nil {
 		return err
 	}
@@ -338,6 +348,7 @@ type CreatePlatformRequest struct {
 	StickyTTLSliding                 *bool    `json:"sticky_ttl_sliding"`
 	RegexFilters                     []string `json:"regex_filters"`
 	RegionFilters                    []string `json:"region_filters"`
+	RegionFailoverOrder              []string `json:"region_failover_order"`
 	ReverseProxyMissAction           *string  `json:"reverse_proxy_miss_action"`
 	ReverseProxyEmptyAccountBehavior *string  `json:"reverse_proxy_empty_account_behavior"`
 	ReverseProxyFixedAccountHeader   *string  `json:"reverse_proxy_fixed_account_header"`
@@ -381,6 +392,9 @@ func (s *ControlPlaneService) CreatePlatform(req CreatePlatformRequest) (*Platfo
 	}
 	if req.RegionFilters != nil {
 		cfg.RegionFilters = req.RegionFilters
+	}
+	if req.RegionFailoverOrder != nil {
+		cfg.RegionFailoverOrder = req.RegionFailoverOrder
 	}
 	if req.ReverseProxyMissAction != nil {
 		if err := setPlatformMissAction(&cfg, *req.ReverseProxyMissAction); err != nil {
@@ -491,6 +505,11 @@ func (s *ControlPlaneService) UpdatePlatform(id string, patchJSON json.RawMessag
 	} else if ok {
 		regionFiltersPatched = true
 		cfg.RegionFilters = filters
+	}
+	if regions, ok, err := patch.optionalStringSlice("region_failover_order"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.RegionFailoverOrder = regions
 	}
 
 	if ma, ok, err := patch.optionalString("reverse_proxy_miss_action"); err != nil {

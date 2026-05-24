@@ -11,12 +11,28 @@ type Platform struct {
 	StickyTTLSliding                 bool   `json:"sticky_ttl_sliding"`
 	RegexFilters                     []string
 	RegionFilters                    []string
-	ReverseProxyMissAction           string `json:"reverse_proxy_miss_action"`
-	ReverseProxyEmptyAccountBehavior string `json:"reverse_proxy_empty_account_behavior"`
-	ReverseProxyFixedAccountHeader   string `json:"reverse_proxy_fixed_account_header"`
-	AllocationPolicy                 string `json:"allocation_policy"`
-	PassiveCircuitBreakerDisabled    bool   `json:"passive_circuit_breaker_disabled"`
-	UpdatedAtNs                      int64  `json:"updated_at_ns"`
+	RegionFailoverOrder              []string `json:"region_failover_order"`
+	ReverseProxyMissAction           string   `json:"reverse_proxy_miss_action"`
+	ReverseProxyEmptyAccountBehavior string   `json:"reverse_proxy_empty_account_behavior"`
+	ReverseProxyFixedAccountHeader   string   `json:"reverse_proxy_fixed_account_header"`
+	AllocationPolicy                 string   `json:"allocation_policy"`
+	PassiveCircuitBreakerDisabled    bool     `json:"passive_circuit_breaker_disabled"`
+	UpdatedAtNs                      int64    `json:"updated_at_ns"`
+}
+
+// AccountRegion records the stable primary region assigned to an account.
+type AccountRegion struct {
+	PlatformID    string `json:"platform_id"`
+	Account       string `json:"account"`
+	PrimaryRegion string `json:"primary_region"`
+	CreatedAtNs   int64  `json:"created_at_ns"`
+	UpdatedAtNs   int64  `json:"updated_at_ns"`
+}
+
+// AccountRegionKey is the composite primary key for account_regions.
+type AccountRegionKey struct {
+	PlatformID string
+	Account    string
 }
 
 // Subscription represents a node subscription source.

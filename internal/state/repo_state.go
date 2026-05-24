@@ -109,6 +109,9 @@ func (r *StateRepo) UpsertPlatform(p model.Platform) error {
 	if err := platform.ValidateRegionFilters(p.RegionFilters); err != nil {
 		return err
 	}
+	if err := platform.ValidateRegionFailoverOrder(p.RegionFailoverOrder); err != nil {
+		return err
+	}
 	missAction := platform.NormalizeReverseProxyMissAction(p.ReverseProxyMissAction)
 	if missAction == "" {
 		return fmt.Errorf("reverse_proxy_miss_action: invalid value %q", p.ReverseProxyMissAction)
@@ -144,29 +147,35 @@ func (r *StateRepo) UpsertPlatform(p model.Platform) error {
 	if err != nil {
 		return fmt.Errorf("encode platform %s region_filters: %w", p.ID, err)
 	}
+	regionFailoverOrderJSON, err := encodeStringSliceJSON(p.RegionFailoverOrder)
+	if err != nil {
+		return fmt.Errorf("encode platform %s region_failover_order: %w", p.ID, err)
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	_, err = r.db.Exec(`
 		INSERT INTO platforms (id, name, sticky_ttl_ns, regex_filters_json, region_filters_json,
+		                       region_failover_order_json,
 		                       reverse_proxy_miss_action, reverse_proxy_empty_account_behavior,
 		                       reverse_proxy_fixed_account_header, allocation_policy,
 		                       passive_circuit_breaker_disabled, sticky_ttl_sliding, updated_at_ns)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name                     = excluded.name,
 			sticky_ttl_ns            = excluded.sticky_ttl_ns,
 			sticky_ttl_sliding       = excluded.sticky_ttl_sliding,
 			regex_filters_json       = excluded.regex_filters_json,
 			region_filters_json      = excluded.region_filters_json,
+			region_failover_order_json = excluded.region_failover_order_json,
 			reverse_proxy_miss_action = excluded.reverse_proxy_miss_action,
 			reverse_proxy_empty_account_behavior = excluded.reverse_proxy_empty_account_behavior,
 			reverse_proxy_fixed_account_header   = excluded.reverse_proxy_fixed_account_header,
 			allocation_policy        = excluded.allocation_policy,
 			passive_circuit_breaker_disabled = excluded.passive_circuit_breaker_disabled,
 			updated_at_ns            = excluded.updated_at_ns
-	`, p.ID, p.Name, p.StickyTTLNs, regexFiltersJSON, regionFiltersJSON,
+	`, p.ID, p.Name, p.StickyTTLNs, regexFiltersJSON, regionFiltersJSON, regionFailoverOrderJSON,
 		p.ReverseProxyMissAction, p.ReverseProxyEmptyAccountBehavior, p.ReverseProxyFixedAccountHeader,
 		p.AllocationPolicy, p.PassiveCircuitBreakerDisabled, p.StickyTTLSliding, p.UpdatedAtNs)
 	if err != nil {
@@ -195,7 +204,16 @@ func (r *StateRepo) DeletePlatform(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	result, err := r.db.Exec("DELETE FROM platforms WHERE id = ?", id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM account_regions WHERE platform_id = ?", id); err != nil {
+		return err
+	}
+	result, err := tx.Exec("DELETE FROM platforms WHERE id = ?", id)
 	if err != nil {
 		return err
 	}
@@ -203,7 +221,7 @@ func (r *StateRepo) DeletePlatform(id string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 // GetPlatformName returns platform name by ID without decoding filter columns.
@@ -222,17 +240,18 @@ func (r *StateRepo) GetPlatformName(id string) (string, error) {
 // GetPlatform returns one platform by ID.
 func (r *StateRepo) GetPlatform(id string) (*model.Platform, error) {
 	row := r.db.QueryRow(`SELECT id, name, sticky_ttl_ns, regex_filters_json, region_filters_json,
+			region_failover_order_json,
 			reverse_proxy_miss_action, reverse_proxy_empty_account_behavior,
 			reverse_proxy_fixed_account_header, allocation_policy,
 			passive_circuit_breaker_disabled, sticky_ttl_sliding, updated_at_ns
 			FROM platforms WHERE id = ?`, id)
 
 	var p model.Platform
-	var regexFiltersJSON, regionFiltersJSON string
+	var regexFiltersJSON, regionFiltersJSON, regionFailoverOrderJSON string
 	var passiveCircuitBreakerDisabled int
 	var stickyTTLSliding int
 	if err := row.Scan(&p.ID, &p.Name, &p.StickyTTLNs, &regexFiltersJSON,
-		&regionFiltersJSON, &p.ReverseProxyMissAction, &p.ReverseProxyEmptyAccountBehavior,
+		&regionFiltersJSON, &regionFailoverOrderJSON, &p.ReverseProxyMissAction, &p.ReverseProxyEmptyAccountBehavior,
 		&p.ReverseProxyFixedAccountHeader, &p.AllocationPolicy, &passiveCircuitBreakerDisabled, &stickyTTLSliding, &p.UpdatedAtNs); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrNotFound
@@ -249,14 +268,19 @@ func (r *StateRepo) GetPlatform(id string) (*model.Platform, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode platform %s region_filters_json: %w", p.ID, err)
 	}
+	regionFailoverOrder, err := decodeStringSliceJSON(regionFailoverOrderJSON)
+	if err != nil {
+		return nil, fmt.Errorf("decode platform %s region_failover_order_json: %w", p.ID, err)
+	}
 	p.RegexFilters = regexFilters
 	p.RegionFilters = regionFilters
+	p.RegionFailoverOrder = regionFailoverOrder
 	return &p, nil
 }
 
 // ListPlatforms returns all platforms.
 func (r *StateRepo) ListPlatforms() ([]model.Platform, error) {
-	rows, err := r.db.Query("SELECT id, name, sticky_ttl_ns, regex_filters_json, region_filters_json, reverse_proxy_miss_action, reverse_proxy_empty_account_behavior, reverse_proxy_fixed_account_header, allocation_policy, passive_circuit_breaker_disabled, sticky_ttl_sliding, updated_at_ns FROM platforms")
+	rows, err := r.db.Query("SELECT id, name, sticky_ttl_ns, regex_filters_json, region_filters_json, region_failover_order_json, reverse_proxy_miss_action, reverse_proxy_empty_account_behavior, reverse_proxy_fixed_account_header, allocation_policy, passive_circuit_breaker_disabled, sticky_ttl_sliding, updated_at_ns FROM platforms")
 	if err != nil {
 		return nil, err
 	}
@@ -265,11 +289,11 @@ func (r *StateRepo) ListPlatforms() ([]model.Platform, error) {
 	var result []model.Platform
 	for rows.Next() {
 		var p model.Platform
-		var regexFiltersJSON, regionFiltersJSON string
+		var regexFiltersJSON, regionFiltersJSON, regionFailoverOrderJSON string
 		var passiveCircuitBreakerDisabled int
 		var stickyTTLSliding int
 		if err := rows.Scan(&p.ID, &p.Name, &p.StickyTTLNs, &regexFiltersJSON,
-			&regionFiltersJSON, &p.ReverseProxyMissAction, &p.ReverseProxyEmptyAccountBehavior,
+			&regionFiltersJSON, &regionFailoverOrderJSON, &p.ReverseProxyMissAction, &p.ReverseProxyEmptyAccountBehavior,
 			&p.ReverseProxyFixedAccountHeader, &p.AllocationPolicy, &passiveCircuitBreakerDisabled, &stickyTTLSliding, &p.UpdatedAtNs); err != nil {
 			return nil, err
 		}
@@ -283,11 +307,173 @@ func (r *StateRepo) ListPlatforms() ([]model.Platform, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decode platform %s region_filters_json: %w", p.ID, err)
 		}
+		regionFailoverOrder, err := decodeStringSliceJSON(regionFailoverOrderJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decode platform %s region_failover_order_json: %w", p.ID, err)
+		}
 		p.RegexFilters = regexFilters
 		p.RegionFilters = regionFilters
+		p.RegionFailoverOrder = regionFailoverOrder
 		result = append(result, p)
 	}
 	return result, rows.Err()
+}
+
+// --- account_regions ---
+
+func normalizeAccountRegion(ar *model.AccountRegion) error {
+	ar.PlatformID = strings.TrimSpace(ar.PlatformID)
+	if ar.PlatformID == "" {
+		return fmt.Errorf("platform_id is required")
+	}
+	ar.Account = strings.TrimSpace(ar.Account)
+	if ar.Account == "" {
+		return fmt.Errorf("account is required")
+	}
+	ar.PrimaryRegion = strings.TrimSpace(ar.PrimaryRegion)
+	if err := platform.ValidateRegionFailoverOrder([]string{ar.PrimaryRegion}); err != nil {
+		return fmt.Errorf("primary_region: %w", err)
+	}
+	now := time.Now().UnixNano()
+	if ar.CreatedAtNs == 0 {
+		ar.CreatedAtNs = now
+	}
+	if ar.UpdatedAtNs == 0 {
+		ar.UpdatedAtNs = ar.CreatedAtNs
+	}
+	return nil
+}
+
+// EnsureAccountRegion inserts an account primary region only when missing.
+func (r *StateRepo) EnsureAccountRegion(ar model.AccountRegion) (bool, error) {
+	if err := normalizeAccountRegion(&ar); err != nil {
+		return false, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result, err := r.db.Exec(`
+		INSERT INTO account_regions (platform_id, account, primary_region, created_at_ns, updated_at_ns)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(platform_id, account) DO NOTHING
+	`, ar.PlatformID, ar.Account, ar.PrimaryRegion, ar.CreatedAtNs, ar.UpdatedAtNs)
+	if err != nil {
+		return false, err
+	}
+	n, _ := result.RowsAffected()
+	return n > 0, nil
+}
+
+// UpsertAccountRegion writes or replaces an account primary region.
+func (r *StateRepo) UpsertAccountRegion(ar model.AccountRegion) error {
+	if err := normalizeAccountRegion(&ar); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, err := r.db.Exec(`
+		INSERT INTO account_regions (platform_id, account, primary_region, created_at_ns, updated_at_ns)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(platform_id, account) DO UPDATE SET
+			primary_region = excluded.primary_region,
+			updated_at_ns  = excluded.updated_at_ns
+	`, ar.PlatformID, ar.Account, ar.PrimaryRegion, ar.CreatedAtNs, ar.UpdatedAtNs)
+	return err
+}
+
+// GetAccountRegion returns the primary region for a platform account.
+func (r *StateRepo) GetAccountRegion(platformID, account string) (*model.AccountRegion, error) {
+	platformID = strings.TrimSpace(platformID)
+	account = strings.TrimSpace(account)
+	if platformID == "" || account == "" {
+		return nil, ErrNotFound
+	}
+
+	row := r.db.QueryRow(`
+		SELECT platform_id, account, primary_region, created_at_ns, updated_at_ns
+		FROM account_regions
+		WHERE platform_id = ? AND account = ?
+	`, platformID, account)
+	var ar model.AccountRegion
+	if err := row.Scan(&ar.PlatformID, &ar.Account, &ar.PrimaryRegion, &ar.CreatedAtNs, &ar.UpdatedAtNs); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &ar, nil
+}
+
+// ListAccountRegions returns all account primary regions for a platform.
+func (r *StateRepo) ListAccountRegions(platformID string) ([]model.AccountRegion, error) {
+	platformID = strings.TrimSpace(platformID)
+	if platformID == "" {
+		return nil, fmt.Errorf("platform_id is required")
+	}
+
+	rows, err := r.db.Query(`
+		SELECT platform_id, account, primary_region, created_at_ns, updated_at_ns
+		FROM account_regions
+		WHERE platform_id = ?
+		ORDER BY account
+	`, platformID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []model.AccountRegion
+	for rows.Next() {
+		var ar model.AccountRegion
+		if err := rows.Scan(&ar.PlatformID, &ar.Account, &ar.PrimaryRegion, &ar.CreatedAtNs, &ar.UpdatedAtNs); err != nil {
+			return nil, err
+		}
+		result = append(result, ar)
+	}
+	return result, rows.Err()
+}
+
+// DeleteAccountRegion removes one account-region affinity row.
+func (r *StateRepo) DeleteAccountRegion(platformID, account string) error {
+	platformID = strings.TrimSpace(platformID)
+	account = strings.TrimSpace(account)
+	if platformID == "" || account == "" {
+		return ErrNotFound
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result, err := r.db.Exec("DELETE FROM account_regions WHERE platform_id = ? AND account = ?", platformID, account)
+	if err != nil {
+		return err
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteAccountRegionsByPlatform removes all account-region affinity rows for a platform.
+func (r *StateRepo) DeleteAccountRegionsByPlatform(platformID string) (int, error) {
+	platformID = strings.TrimSpace(platformID)
+	if platformID == "" {
+		return 0, nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result, err := r.db.Exec("DELETE FROM account_regions WHERE platform_id = ?", platformID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
 }
 
 // --- subscriptions ---

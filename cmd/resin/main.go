@@ -469,6 +469,7 @@ func ensureDefaultPlatform(
 		StickyTTLSliding:                 false,
 		RegexFilters:                     append([]string(nil), envCfg.DefaultPlatformRegexFilters...),
 		RegionFilters:                    append([]string(nil), envCfg.DefaultPlatformRegionFilters...),
+		RegionFailoverOrder:              []string{},
 		ReverseProxyMissAction:           envCfg.DefaultPlatformReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: envCfg.DefaultPlatformReverseProxyEmptyAccountBehavior,
 		ReverseProxyFixedAccountHeader:   envCfg.DefaultPlatformReverseProxyFixedAccountHeader,

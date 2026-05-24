@@ -26,6 +26,7 @@ const (
 	stateVersionAddIncrementalAliveNodes         = 5
 	stateVersionAddPassiveCircuitBreakerDisabled = 6
 	stateVersionAddStickyTTLSliding              = 7
+	stateVersionAddPlatformRegionAffinity        = 8
 	stateLegacyBaselineVersion                   = stateVersionAddFixedAccountHeader
 
 	stateBaseSchemaMigration = stateMigrationsPath + "/000001_state_base.up.sql"
@@ -117,12 +118,23 @@ func prepareLegacyStateBaseline(db *sql.DB, driver migratedb.Driver) error {
 	if err != nil {
 		return err
 	}
+	hasRegionFailoverOrder, err := hasTableColumn(db, "platforms", "region_failover_order_json")
+	if err != nil {
+		return err
+	}
+	hasAccountRegions, err := hasTable(db, "account_regions")
+	if err != nil {
+		return err
+	}
 	hasIncrementalAliveNodes, err := hasTableColumn(db, "subscriptions", "incremental_alive_nodes")
 	if err != nil {
 		return err
 	}
 
 	switch {
+	case hasEmptyBehavior && hasFixedHeader && hasIncrementalAliveNodes && hasPassiveCircuitBreakerDisabled &&
+		hasStickyTTLSliding && hasRegionFailoverOrder && hasAccountRegions:
+		return setLegacyMigrationVersion(db, driver, stateVersionAddPlatformRegionAffinity)
 	case hasEmptyBehavior && hasFixedHeader && hasIncrementalAliveNodes && hasPassiveCircuitBreakerDisabled && hasStickyTTLSliding:
 		return setLegacyMigrationVersion(db, driver, stateVersionAddStickyTTLSliding)
 	case hasEmptyBehavior && hasFixedHeader && hasIncrementalAliveNodes && hasPassiveCircuitBreakerDisabled:

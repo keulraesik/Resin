@@ -109,8 +109,8 @@ func TestMigrateStateDB_LegacyBaselineAdvancesToLatest(t *testing.T) {
 	if dirty {
 		t.Fatalf("schema_migrations dirty=true")
 	}
-	if version != stateVersionAddStickyTTLSliding {
-		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddStickyTTLSliding)
+	if version != stateVersionAddPlatformRegionAffinity {
+		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformRegionAffinity)
 	}
 	if ok, err := hasTableColumn(db, "subscriptions", "incremental_alive_nodes"); err != nil || !ok {
 		t.Fatalf("expected migrated column subscriptions.incremental_alive_nodes, ok=%v err=%v", ok, err)
@@ -120,6 +120,12 @@ func TestMigrateStateDB_LegacyBaselineAdvancesToLatest(t *testing.T) {
 	}
 	if ok, err := hasTableColumn(db, "platforms", "sticky_ttl_sliding"); err != nil || !ok {
 		t.Fatalf("expected migrated column platforms.sticky_ttl_sliding, ok=%v err=%v", ok, err)
+	}
+	if ok, err := hasTableColumn(db, "platforms", "region_failover_order_json"); err != nil || !ok {
+		t.Fatalf("expected migrated column platforms.region_failover_order_json, ok=%v err=%v", ok, err)
+	}
+	if ok, err := hasTable(db, "account_regions"); err != nil || !ok {
+		t.Fatalf("expected migrated table account_regions, ok=%v err=%v", ok, err)
 	}
 }
 
@@ -179,14 +185,20 @@ func TestMigrateStateDB_AddsIncrementalAliveNodesToLegacySubscriptions(t *testin
 	if dirty {
 		t.Fatalf("schema_migrations dirty=true")
 	}
-	if version != stateVersionAddStickyTTLSliding {
-		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddStickyTTLSliding)
+	if version != stateVersionAddPlatformRegionAffinity {
+		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformRegionAffinity)
 	}
 	if ok, err := hasTableColumn(db, "platforms", "passive_circuit_breaker_disabled"); err != nil || !ok {
 		t.Fatalf("expected migrated column platforms.passive_circuit_breaker_disabled, ok=%v err=%v", ok, err)
 	}
 	if ok, err := hasTableColumn(db, "platforms", "sticky_ttl_sliding"); err != nil || !ok {
 		t.Fatalf("expected migrated column platforms.sticky_ttl_sliding, ok=%v err=%v", ok, err)
+	}
+	if ok, err := hasTableColumn(db, "platforms", "region_failover_order_json"); err != nil || !ok {
+		t.Fatalf("expected migrated column platforms.region_failover_order_json, ok=%v err=%v", ok, err)
+	}
+	if ok, err := hasTable(db, "account_regions"); err != nil || !ok {
+		t.Fatalf("expected migrated table account_regions, ok=%v err=%v", ok, err)
 	}
 }
 
@@ -257,8 +269,8 @@ func TestMigrateStateDB_NormalizesLegacyRandomMissAction(t *testing.T) {
 	if dirty {
 		t.Fatalf("schema_migrations dirty=true")
 	}
-	if version != stateVersionAddStickyTTLSliding {
-		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddStickyTTLSliding)
+	if version != stateVersionAddPlatformRegionAffinity {
+		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformRegionAffinity)
 	}
 	if ok, err := hasTableColumn(db, "subscriptions", "incremental_alive_nodes"); err != nil || !ok {
 		t.Fatalf("expected migrated column subscriptions.incremental_alive_nodes, ok=%v err=%v", ok, err)
@@ -268,6 +280,12 @@ func TestMigrateStateDB_NormalizesLegacyRandomMissAction(t *testing.T) {
 	}
 	if ok, err := hasTableColumn(db, "platforms", "sticky_ttl_sliding"); err != nil || !ok {
 		t.Fatalf("expected migrated column platforms.sticky_ttl_sliding, ok=%v err=%v", ok, err)
+	}
+	if ok, err := hasTableColumn(db, "platforms", "region_failover_order_json"); err != nil || !ok {
+		t.Fatalf("expected migrated column platforms.region_failover_order_json, ok=%v err=%v", ok, err)
+	}
+	if ok, err := hasTable(db, "account_regions"); err != nil || !ok {
+		t.Fatalf("expected migrated table account_regions, ok=%v err=%v", ok, err)
 	}
 }
 
@@ -328,6 +346,7 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	p := model.Platform{
 		ID: "plat-1", Name: "Default", StickyTTLNs: 1000,
 		RegexFilters: []string{}, RegionFilters: []string{},
+		RegionFailoverOrder:    []string{"us", "jp"},
 		ReverseProxyMissAction: "TREAT_AS_EMPTY", AllocationPolicy: "BALANCED",
 		PassiveCircuitBreakerDisabled: true,
 		StickyTTLSliding:              true,
@@ -357,6 +376,9 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	if !got.StickyTTLSliding {
 		t.Fatal("expected sticky_ttl_sliding to round-trip true")
 	}
+	if !reflect.DeepEqual(got.RegionFailoverOrder, []string{"us", "jp"}) {
+		t.Fatalf("region_failover_order: got %v, want %v", got.RegionFailoverOrder, []string{"us", "jp"})
+	}
 
 	// List.
 	list, err := repo.ListPlatforms()
@@ -371,6 +393,7 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	p.Name = "Default-Renamed"
 	p.PassiveCircuitBreakerDisabled = false
 	p.StickyTTLSliding = false
+	p.RegionFailoverOrder = []string{"sg"}
 	if err := repo.UpsertPlatform(p); err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +409,9 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	}
 	if list[0].StickyTTLSliding {
 		t.Fatal("expected sticky_ttl_sliding to update to false")
+	}
+	if !reflect.DeepEqual(list[0].RegionFailoverOrder, []string{"sg"}) {
+		t.Fatalf("expected region_failover_order to update, got %v", list[0].RegionFailoverOrder)
 	}
 
 	// Delete.
@@ -496,9 +522,17 @@ func TestStateRepo_Platform_ValidationRejectsInvalidRegex(t *testing.T) {
 		t.Fatal("expected error for invalid region_filters")
 	}
 
+	// Invalid region_failover_order.
+	bad = base
+	bad.RegionFailoverOrder = []string{"!hk"}
+	if err := repo.UpsertPlatform(bad); err == nil {
+		t.Fatal("expected error for invalid region_failover_order")
+	}
+
 	// Valid config should still succeed.
 	base.RegexFilters = []string{"^ss$", "vmess"}
 	base.RegionFilters = []string{"us", "jp"}
+	base.RegionFailoverOrder = []string{"us", "jp"}
 	if err := repo.UpsertPlatform(base); err != nil {
 		t.Fatalf("valid platform rejected: %v", err)
 	}
@@ -763,6 +797,96 @@ func TestStateRepo_EnsureAccountHeaderRule_InsertsOnlyWhenMissing(t *testing.T) 
 	}
 	if !reflect.DeepEqual(list[0].Headers, []string{"Authorization", "x-api-key"}) {
 		t.Fatalf("headers = %v, want %v", list[0].Headers, []string{"Authorization", "x-api-key"})
+	}
+}
+
+// --- account_regions ---
+
+func TestStateRepo_AccountRegions_CRUD(t *testing.T) {
+	repo := newTestStateRepo(t)
+	now := time.Now().UnixNano()
+
+	ar := model.AccountRegion{
+		PlatformID: "plat-1", Account: "acct-1", PrimaryRegion: "us",
+		CreatedAtNs: now, UpdatedAtNs: now,
+	}
+	created, err := repo.EnsureAccountRegion(ar)
+	if err != nil {
+		t.Fatalf("EnsureAccountRegion first call: %v", err)
+	}
+	if !created {
+		t.Fatal("expected first ensure call to create row")
+	}
+
+	created, err = repo.EnsureAccountRegion(model.AccountRegion{
+		PlatformID: "plat-1", Account: "acct-1", PrimaryRegion: "jp",
+		CreatedAtNs: now + 1, UpdatedAtNs: now + 1,
+	})
+	if err != nil {
+		t.Fatalf("EnsureAccountRegion second call: %v", err)
+	}
+	if created {
+		t.Fatal("expected second ensure call to skip existing row")
+	}
+
+	got, err := repo.GetAccountRegion("plat-1", "acct-1")
+	if err != nil {
+		t.Fatalf("GetAccountRegion: %v", err)
+	}
+	if got.PrimaryRegion != "us" {
+		t.Fatalf("primary_region after ensure: got %q, want %q", got.PrimaryRegion, "us")
+	}
+
+	ar.PrimaryRegion = "jp"
+	ar.UpdatedAtNs = now + 2
+	if err := repo.UpsertAccountRegion(ar); err != nil {
+		t.Fatalf("UpsertAccountRegion: %v", err)
+	}
+	list, err := repo.ListAccountRegions("plat-1")
+	if err != nil {
+		t.Fatalf("ListAccountRegions: %v", err)
+	}
+	if len(list) != 1 || list[0].PrimaryRegion != "jp" {
+		t.Fatalf("unexpected account region list: %+v", list)
+	}
+
+	if err := repo.DeleteAccountRegion("plat-1", "acct-1"); err != nil {
+		t.Fatalf("DeleteAccountRegion: %v", err)
+	}
+	if _, err := repo.GetAccountRegion("plat-1", "acct-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestStateRepo_DeletePlatform_RemovesAccountRegions(t *testing.T) {
+	repo := newTestStateRepo(t)
+	now := time.Now().UnixNano()
+
+	p := model.Platform{
+		ID: "plat-1", Name: "Platform-1", StickyTTLNs: 1000,
+		RegexFilters: []string{}, RegionFilters: []string{},
+		ReverseProxyMissAction: "TREAT_AS_EMPTY", AllocationPolicy: "BALANCED",
+		UpdatedAtNs: now,
+	}
+	if err := repo.UpsertPlatform(p); err != nil {
+		t.Fatalf("UpsertPlatform: %v", err)
+	}
+	if _, err := repo.EnsureAccountRegion(model.AccountRegion{
+		PlatformID: "plat-1", Account: "acct-1", PrimaryRegion: "us",
+		CreatedAtNs: now, UpdatedAtNs: now,
+	}); err != nil {
+		t.Fatalf("EnsureAccountRegion: %v", err)
+	}
+
+	if err := repo.DeletePlatform("plat-1"); err != nil {
+		t.Fatalf("DeletePlatform: %v", err)
+	}
+	regions, err := repo.ListAccountRegions("plat-1")
+	if err != nil {
+		t.Fatalf("ListAccountRegions: %v", err)
+	}
+	if len(regions) != 0 {
+		t.Fatalf("expected account regions removed with platform, got %+v", regions)
 	}
 }
 
