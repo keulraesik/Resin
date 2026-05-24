@@ -61,3 +61,13 @@ export type AccountRegion = {
   created_at: string;
   updated_at: string;
 };
+
+export type PlatformLease = {
+  platform_id: string;
+  account: string;
+  node_hash: string;
+  node_tag: string;
+  egress_ip: string;
+  expiry: string;
+  last_accessed: string;
+};

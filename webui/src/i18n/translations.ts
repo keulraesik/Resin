@@ -568,6 +568,24 @@ const EXACT_ZH_TO_EN: Record<string, string> = {
   "确认清除账号 {{account}} 的 Region 亲和？": "Clear Region affinity for account {{account}}?",
   "确认清除平台 {{name}} 的所有账号 Region 亲和？":
     "Clear all account Region affinity records for platform {{name}}?",
+  "租约管理": "Lease Management",
+  "按账号关键词搜索当前平台租约，选择后删除单条租约。":
+    "Search current platform leases by account keyword, then select and delete one lease.",
+  "输入至少 2 个字符搜索账号租约": "Enter at least 2 characters to search account leases",
+  "搜索账号租约": "Search account leases",
+  "输入账号关键词后搜索": "Enter an account keyword to search",
+  "至少输入 2 个字符": "Enter at least 2 characters",
+  "搜索中...": "Searching...",
+  "未找到匹配租约": "No matching leases found",
+  "仅显示最近访问的前 50 条，请输入更具体的关键词。":
+    "Showing only the 50 most recently accessed matches. Enter a more specific keyword.",
+  "节点 Hash": "Node Hash",
+  "最后访问": "Last Accessed",
+  "删除选中租约": "Delete Selected Lease",
+  "账号 {{account}} 的租约已删除": "Lease for account {{account}} deleted",
+  "租约已不存在，请刷新": "Lease no longer exists; refresh",
+  "确认删除账号 {{account}} 的租约？下次请求将重新分配出口。":
+    "Delete the lease for account {{account}}? The next request will receive a new egress assignment.",
   "请求日志详情": "Request log details",
   "请选择要编辑的订阅": "Please select a subscription to edit",
   "删除后该规则将不再生效。": "After deletion, this rule will no longer take effect.",

@@ -2668,6 +2668,115 @@ a {
   flex-shrink: 0;
 }
 
+.platform-lease-manager {
+  border: 1px solid rgba(37, 72, 120, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.platform-lease-manager > .btn {
+  align-self: flex-start;
+}
+
+.platform-lease-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.platform-lease-row {
+  width: 100%;
+  min-height: 54px;
+  border: 1px solid rgba(37, 72, 120, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text-main);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.platform-lease-row:hover {
+  border-color: rgba(32, 104, 246, 0.34);
+}
+
+.platform-lease-row-selected {
+  border-color: rgba(32, 104, 246, 0.68);
+  box-shadow: 0 0 0 2px rgba(32, 104, 246, 0.1);
+}
+
+.platform-lease-row-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.platform-lease-row-main strong,
+.platform-lease-row-meta,
+.platform-lease-detail strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-lease-row-main strong {
+  font-size: 13px;
+}
+
+.platform-lease-row-main span {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(40, 145, 96, 0.1);
+  color: #176343;
+  padding: 2px 7px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.platform-lease-row-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.platform-lease-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.platform-lease-detail > div {
+  min-width: 0;
+  border: 1px solid rgba(37, 72, 120, 0.12);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.platform-lease-detail span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.platform-lease-detail strong {
+  color: #173f74;
+  font-size: 13px;
+}
+
 .platform-account-region-list {
   border: 1px solid rgba(37, 72, 120, 0.14);
   border-radius: 12px;
@@ -2848,6 +2957,14 @@ a {
 
   .platform-op-item .btn {
     width: 100%;
+  }
+
+  .platform-lease-manager > .btn {
+    width: 100%;
+  }
+
+  .platform-lease-detail {
+    grid-template-columns: 1fr;
   }
 
   .platform-account-region-row {

@@ -14,16 +14,19 @@ import { Textarea } from "../../components/ui/Textarea";
 import { ToastContainer } from "../../components/ui/Toast";
 import { useToast } from "../../hooks/useToast";
 import { useI18n } from "../../i18n";
+import { ApiError } from "../../lib/api-client";
 import { formatApiErrorMessage } from "../../lib/error-message";
-import { formatGoDuration, formatRelativeTime } from "../../lib/time";
+import { formatDateTime, formatGoDuration, formatRelativeTime } from "../../lib/time";
 import {
   clearAllAccountRegions,
   clearAllPlatformLeases,
   deleteAccountRegion,
+  deletePlatformLease,
   deletePlatform,
   getPlatform,
   listAccountRegions,
   resetPlatform,
+  searchPlatformLeases,
   updatePlatform,
 } from "./api";
 import {
@@ -43,10 +46,12 @@ import {
   type PlatformFormValues,
 } from "./formModel";
 import { PlatformMonitorPanel } from "./PlatformMonitorPanel";
+import type { PlatformLease } from "./types";
 
 type PlatformDetailTab = "monitor" | "config" | "ops";
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+const EMPTY_PLATFORM_LEASES: PlatformLease[] = [];
 const DETAIL_TABS: Array<{ key: PlatformDetailTab; label: string; hint: string }> = [
   { key: "monitor", label: "监控", hint: "平台运行态趋势和快照" },
   { key: "config", label: "配置", hint: "过滤规则与分配策略" },
@@ -58,6 +63,9 @@ export function PlatformDetailPage() {
   const { platformId = "" } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<PlatformDetailTab>("monitor");
+  const [leaseSearchInput, setLeaseSearchInput] = useState("");
+  const [debouncedLeaseKeyword, setDebouncedLeaseKeyword] = useState("");
+  const [selectedLeaseAccount, setSelectedLeaseAccount] = useState("");
   const { toasts, showToast, dismissToast } = useToast();
   const queryClient = useQueryClient();
   const formatPlatformMutationError = (error: unknown) => {
@@ -77,6 +85,37 @@ export function PlatformDetailPage() {
   });
 
   const platform = platformQuery.data ?? null;
+  const leaseSearchTrimmed = leaseSearchInput.trim();
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      const keyword = leaseSearchInput.trim();
+      setDebouncedLeaseKeyword(keyword.length >= 2 ? keyword : "");
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [leaseSearchInput]);
+
+  const leaseSearchEnabled = Boolean(platformId) && debouncedLeaseKeyword.length >= 2;
+  const leaseSearchQuery = useQuery({
+    queryKey: ["platform-leases-search", platformId, debouncedLeaseKeyword],
+    queryFn: () => searchPlatformLeases(platformId, debouncedLeaseKeyword),
+    enabled: leaseSearchEnabled,
+    placeholderData: (previous) => previous,
+  });
+  const leaseResults = leaseSearchEnabled ? leaseSearchQuery.data?.items ?? EMPTY_PLATFORM_LEASES : EMPTY_PLATFORM_LEASES;
+  const selectedLease = leaseResults.find((lease) => lease.account === selectedLeaseAccount) ?? null;
+
+  useEffect(() => {
+    if (!leaseSearchEnabled) {
+      setSelectedLeaseAccount("");
+      return;
+    }
+    if (leaseResults.length === 1) {
+      setSelectedLeaseAccount(leaseResults[0].account);
+      return;
+    }
+    setSelectedLeaseAccount((current) => (leaseResults.some((lease) => lease.account === current) ? current : ""));
+  }, [leaseSearchEnabled, leaseResults]);
 
   const accountRegionsQuery = useQuery({
     queryKey: ["platform-account-regions", platformId],
@@ -155,6 +194,31 @@ export function PlatformDetailPage() {
       showToast("success", t("平台 {{name}} 的所有租约已清除", { name: updated.name }));
     },
     onError: (error) => {
+      showToast("error", formatApiErrorMessage(error, t));
+    },
+  });
+
+  const deleteLeaseMutation = useMutation({
+    mutationFn: async (account: string) => {
+      if (!platform) {
+        throw new Error("平台不存在或已被删除");
+      }
+      await deletePlatformLease(platform.id, account);
+      return account;
+    },
+    onSuccess: async (account) => {
+      setSelectedLeaseAccount("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["platform-leases-search", platformId] }),
+        queryClient.invalidateQueries({ queryKey: ["platform-monitor"] }),
+      ]);
+      showToast("success", t("账号 {{account}} 的租约已删除", { account }));
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 404) {
+        showToast("error", t("租约已不存在，请刷新"));
+        return;
+      }
       showToast("error", formatApiErrorMessage(error, t));
     },
   });
@@ -239,6 +303,19 @@ export function PlatformDetailPage() {
     await clearLeasesMutation.mutateAsync();
   };
 
+  const handleDeleteSelectedLease = async () => {
+    if (!selectedLease) {
+      return;
+    }
+    const confirmed = window.confirm(
+      t("确认删除账号 {{account}} 的租约？下次请求将重新分配出口。", { account: selectedLease.account }),
+    );
+    if (!confirmed) {
+      return;
+    }
+    await deleteLeaseMutation.mutateAsync(selectedLease.account);
+  };
+
   const handleDeleteAccountRegion = async (account: string) => {
     const confirmed = window.confirm(t("确认清除账号 {{account}} 的 Region 亲和？", { account }));
     if (!confirmed) {
@@ -262,6 +339,9 @@ export function PlatformDetailPage() {
   const regionCount = platform?.region_filters.length ?? 0;
   const failoverCount = platform?.region_failover_order.length ?? 0;
   const regexCount = platform?.regex_filters.length ?? 0;
+  const leaseSearchNeedsMoreInput = leaseSearchTrimmed.length > 0 && leaseSearchTrimmed.length < 2;
+  const leaseSearchTotal = leaseSearchEnabled ? leaseSearchQuery.data?.total ?? 0 : 0;
+  const leaseSearchLimited = leaseSearchTotal > leaseResults.length;
   const deleteDisabled = !platform || platform.id === ZERO_UUID || deleteMutation.isPending;
 
   return (
@@ -615,6 +695,115 @@ export function PlatformDetailPage() {
                 </div>
 
                 <div className="platform-ops-list">
+                  <div className="platform-op-item">
+                    <div className="platform-op-copy">
+                      <h5>{t("租约管理")}</h5>
+                      <p className="platform-op-hint">{t("按账号关键词搜索当前平台租约，选择后删除单条租约。")}</p>
+                    </div>
+                    <Button
+                      variant="secondary"
+                      onClick={() => leaseSearchQuery.refetch()}
+                      disabled={!leaseSearchEnabled || leaseSearchQuery.isFetching}
+                    >
+                      {leaseSearchQuery.isFetching ? t("刷新中...") : t("刷新")}
+                    </Button>
+                  </div>
+
+                  <div className="platform-lease-manager">
+                    <Input
+                      value={leaseSearchInput}
+                      onChange={(event) => setLeaseSearchInput(event.target.value)}
+                      placeholder={t("输入至少 2 个字符搜索账号租约")}
+                      aria-label={t("搜索账号租约")}
+                    />
+
+                    {leaseSearchTrimmed.length === 0 ? (
+                      <p className="muted">{t("输入账号关键词后搜索")}</p>
+                    ) : null}
+                    {leaseSearchNeedsMoreInput ? <p className="muted">{t("至少输入 2 个字符")}</p> : null}
+                    {leaseSearchEnabled && leaseSearchQuery.isFetching ? <p className="muted">{t("搜索中...")}</p> : null}
+                    {leaseSearchQuery.isError ? (
+                      <div className="callout callout-error">
+                        <AlertTriangle size={14} />
+                        <span>{formatApiErrorMessage(leaseSearchQuery.error, t)}</span>
+                      </div>
+                    ) : null}
+                    {leaseSearchEnabled && !leaseSearchQuery.isFetching && !leaseSearchQuery.isError && leaseResults.length === 0 ? (
+                      <p className="muted">{t("未找到匹配租约")}</p>
+                    ) : null}
+
+                    {leaseResults.length > 0 ? (
+                      <div className="platform-lease-results">
+                        {leaseResults.map((lease) => {
+                          const selected = lease.account === selectedLeaseAccount;
+                          const nodeLabel = lease.node_tag || lease.node_hash;
+                          return (
+                            <button
+                              key={`${lease.platform_id}:${lease.account}`}
+                              type="button"
+                              className={`platform-lease-row ${selected ? "platform-lease-row-selected" : ""}`}
+                              onClick={() => setSelectedLeaseAccount(lease.account)}
+                            >
+                              <span className="platform-lease-row-main">
+                                <strong title={lease.account}>{lease.account}</strong>
+                                <span>{lease.egress_ip}</span>
+                              </span>
+                              <span className="platform-lease-row-meta" title={nodeLabel}>
+                                {nodeLabel}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {leaseSearchLimited ? (
+                      <p className="muted">{t("仅显示最近访问的前 50 条，请输入更具体的关键词。")}</p>
+                    ) : null}
+
+                    {selectedLease ? (
+                      <div className="platform-lease-detail">
+                        <div>
+                          <span>{t("账号")}</span>
+                          <strong title={selectedLease.account}>{selectedLease.account}</strong>
+                        </div>
+                        <div>
+                          <span>{t("出口 IP")}</span>
+                          <strong>{selectedLease.egress_ip}</strong>
+                        </div>
+                        <div>
+                          <span>{t("节点")}</span>
+                          <strong title={selectedLease.node_tag || t("无节点名信息")}>
+                            {selectedLease.node_tag || t("无节点名信息")}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>{t("节点 Hash")}</span>
+                          <strong title={selectedLease.node_hash}>{selectedLease.node_hash}</strong>
+                        </div>
+                        <div>
+                          <span>{t("租约过期")}</span>
+                          <strong>{formatDateTime(selectedLease.expiry)}</strong>
+                        </div>
+                        <div>
+                          <span>{t("最后访问")}</span>
+                          <strong>{formatDateTime(selectedLease.last_accessed)}</strong>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {selectedLease ? (
+                      <Button
+                        variant="danger"
+                        onClick={() => void handleDeleteSelectedLease()}
+                        disabled={deleteLeaseMutation.isPending}
+                      >
+                        <Trash2 size={15} />
+                        {deleteLeaseMutation.isPending ? t("删除中...") : t("删除选中租约")}
+                      </Button>
+                    ) : null}
+                  </div>
+
                   <div className="platform-op-item">
                     <div className="platform-op-copy">
                       <h5>{t("账号 Region 亲和")}</h5>
