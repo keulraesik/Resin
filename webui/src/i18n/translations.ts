@@ -552,6 +552,15 @@ const EXACT_ZH_TO_EN: Record<string, string> = {
   "Region 回退": "Region failover",
   "Region 回退顺序": "Region failover order",
   "Region 回退顺序（可选）": "Region failover order (optional)",
+  "禁用 IP": "Blocked IPs",
+  "禁用出口 IP": "Blocked egress IPs",
+  "禁用出口 IP（可选）": "Blocked egress IPs (optional)",
+  "当前平台不会分配这些出口 IP 上的节点。":
+    "This platform will not assign nodes using these egress IPs.",
+  "每行一个 IP，如 1.2.3.4 或 2001:db8::1":
+    "One IP per line, e.g. 1.2.3.4 or 2001:db8::1",
+  "只支持单个 IPv4/IPv6 地址，不支持 CIDR、通配符或范围。":
+    "Only individual IPv4/IPv6 addresses are supported; CIDR, wildcards, and ranges are not supported.",
   "每行一条，如 us / jp / sg": "One per line, e.g. us / jp / sg",
   "Sticky 账号无同 IP 可用时，先尝试账号主 Region，再按这里的顺序寻找可用节点。":
     "When a sticky account has no same-IP node available, try its primary region first, then follow this order.",
@@ -586,6 +595,14 @@ const EXACT_ZH_TO_EN: Record<string, string> = {
   "租约已不存在，请刷新": "Lease no longer exists; refresh",
   "确认删除账号 {{account}} 的租约？下次请求将重新分配出口。":
     "Delete the lease for account {{account}}? The next request will receive a new egress assignment.",
+  "禁用此出口 IP": "Block this egress IP",
+  "已禁用此出口 IP": "This egress IP is blocked",
+  "禁用中...": "Blocking...",
+  "已在平台 {{platform}} 禁用出口 IP {{ip}}": "Blocked egress IP {{ip}} on platform {{platform}}",
+  "该出口 IP 已在平台 {{platform}} 的禁用列表":
+    "This egress IP is already blocked on platform {{platform}}",
+  "确认在平台 {{platform}} 禁用出口 IP {{ip}}？新请求将不再分配该 IP。":
+    "Block egress IP {{ip}} on platform {{platform}}? New requests will no longer be assigned this IP.",
   "请求日志详情": "Request log details",
   "请选择要编辑的订阅": "Please select a subscription to edit",
   "删除后该规则将不再生效。": "After deletion, this rule will no longer take effect.",

@@ -3,10 +3,11 @@ import type { AccountRegion, PageResponse, Platform, PlatformCreateInput, Platfo
 
 const basePath = "/api/v1/platforms";
 
-type ApiPlatform = Omit<Platform, "regex_filters" | "region_filters" | "region_failover_order"> & {
+type ApiPlatform = Omit<Platform, "regex_filters" | "region_filters" | "region_failover_order" | "blocked_egress_ips"> & {
   regex_filters?: string[] | null;
   region_filters?: string[] | null;
   region_failover_order?: string[] | null;
+  blocked_egress_ips?: string[] | null;
   routable_node_count?: number | null;
   sticky_ttl_sliding?: boolean | null;
   reverse_proxy_miss_action?: Platform["reverse_proxy_miss_action"] | null;
@@ -29,6 +30,7 @@ function normalizePlatform(raw: ApiPlatform): Platform {
     regex_filters: Array.isArray(raw.regex_filters) ? raw.regex_filters : [],
     region_filters: Array.isArray(raw.region_filters) ? raw.region_filters : [],
     region_failover_order: Array.isArray(raw.region_failover_order) ? raw.region_failover_order : [],
+    blocked_egress_ips: Array.isArray(raw.blocked_egress_ips) ? raw.blocked_egress_ips : [],
     routable_node_count: typeof raw.routable_node_count === "number" ? raw.routable_node_count : 0,
     sticky_ttl_sliding: typeof raw.sticky_ttl_sliding === "boolean" ? raw.sticky_ttl_sliding : false,
     reverse_proxy_empty_account_behavior:
@@ -111,6 +113,17 @@ export async function rebuildPlatform(id: string): Promise<void> {
   await apiRequest<{ status: "ok" }>(`${basePath}/${id}/actions/rebuild-routable-view`, {
     method: "POST",
   });
+}
+
+export async function blockPlatformEgressIP(id: string, egressIp: string): Promise<{ platform: Platform; created: boolean }> {
+  const data = await apiRequest<{ platform: ApiPlatform; created: boolean }>(`${basePath}/${id}/actions/block-egress-ip`, {
+    method: "POST",
+    body: { egress_ip: egressIp },
+  });
+  return {
+    platform: normalizePlatform(data.platform),
+    created: Boolean(data.created),
+  };
 }
 
 export async function clearAllPlatformLeases(id: string): Promise<void> {

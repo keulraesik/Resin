@@ -2626,6 +2626,12 @@ a {
   justify-content: flex-end;
 }
 
+.request-log-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .platform-ops-list {
   --platform-op-btn-width: 164px;
   display: flex;

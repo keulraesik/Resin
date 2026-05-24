@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createColumnHelper } from "@tanstack/react-table";
-import { AlertTriangle, Eraser, RefreshCw, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Ban, Eraser, RefreshCw, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
@@ -17,6 +17,7 @@ import { getCurrentLocale, isEnglishLocale } from "../../i18n/locale";
 import { formatBytes } from "../../lib/bytes";
 import { formatApiErrorMessage } from "../../lib/error-message";
 import { formatDateTime } from "../../lib/time";
+import { blockPlatformEgressIP, getPlatform } from "../platforms/api";
 import { getSystemConfig } from "../systemConfig/api";
 import { getRequestLog, getRequestLogPayloads, listRequestLogs } from "./api";
 import type { RequestLogItem, RequestLogListFilters } from "./types";
@@ -347,7 +348,8 @@ export function RequestLogsPage() {
     body: "",
   });
   const [payloadDecodePending, setPayloadDecodePending] = useState(false);
-  const { toasts, dismissToast } = useToast();
+  const { toasts, showToast, dismissToast } = useToast();
+  const queryClient = useQueryClient();
 
   const configQuery = useQuery({
     queryKey: ["system-config"],
@@ -402,6 +404,40 @@ export function RequestLogsPage() {
   });
 
   const detailLog: RequestLogItem | null = detailQuery.data ?? selectedLog ?? null;
+  const canBlockDetailEgressIP = Boolean(detailLog?.platform_id && detailLog?.egress_ip);
+
+  const detailPlatformQuery = useQuery({
+    queryKey: ["platform", detailLog?.platform_id ?? ""],
+    queryFn: () => getPlatform(detailLog?.platform_id ?? ""),
+    enabled: drawerVisible && canBlockDetailEgressIP,
+    staleTime: 30_000,
+  });
+
+  const detailEgressIPBlocked = Boolean(
+    detailLog?.egress_ip && detailPlatformQuery.data?.blocked_egress_ips.includes(detailLog.egress_ip),
+  );
+
+  const blockEgressIPMutation = useMutation({
+    mutationFn: async (input: { platformId: string; egressIp: string; platformName: string }) => {
+      const result = await blockPlatformEgressIP(input.platformId, input.egressIp);
+      return { ...input, result };
+    },
+    onSuccess: async ({ platformId, egressIp, platformName, result }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["platform", platformId] }),
+        queryClient.invalidateQueries({ queryKey: ["platforms"] }),
+      ]);
+      showToast(
+        "success",
+        result.created
+          ? t("已在平台 {{platform}} 禁用出口 IP {{ip}}", { platform: platformName, ip: egressIp })
+          : t("该出口 IP 已在平台 {{platform}} 的禁用列表", { platform: platformName }),
+      );
+    },
+    onError: (error) => {
+      showToast("error", formatApiErrorMessage(error, t));
+    },
+  });
 
   const payloadQuery = useQuery({
     queryKey: ["request-log-payload", detailLogId],
@@ -446,6 +482,31 @@ export function RequestLogsPage() {
     setSelectedLogId(logId);
     setDrawerOpen(true);
     setPayloadTab("request");
+  };
+
+  const handleBlockDetailEgressIP = async () => {
+    if (!detailLog?.platform_id || !detailLog.egress_ip) {
+      return;
+    }
+    const platformName = detailLog.platform_name || detailLog.platform_id;
+    if (detailEgressIPBlocked) {
+      showToast("success", t("该出口 IP 已在平台 {{platform}} 的禁用列表", { platform: platformName }));
+      return;
+    }
+    const confirmed = window.confirm(
+      t("确认在平台 {{platform}} 禁用出口 IP {{ip}}？新请求将不再分配该 IP。", {
+        platform: platformName,
+        ip: detailLog.egress_ip,
+      }),
+    );
+    if (!confirmed) {
+      return;
+    }
+    await blockEgressIPMutation.mutateAsync({
+      platformId: detailLog.platform_id,
+      egressIp: detailLog.egress_ip,
+      platformName,
+    });
   };
 
   const moveNext = () => {
@@ -951,6 +1012,23 @@ export function RequestLogsPage() {
                     <p>{detailLog.client_ip || "-"}</p>
                   </div>
                 </div>
+
+                {canBlockDetailEgressIP ? (
+                  <div className="request-log-actions">
+                    <Button
+                      variant={detailEgressIPBlocked ? "secondary" : "danger"}
+                      onClick={() => void handleBlockDetailEgressIP()}
+                      disabled={detailPlatformQuery.isFetching || detailEgressIPBlocked || blockEgressIPMutation.isPending}
+                    >
+                      <Ban size={15} />
+                      {detailEgressIPBlocked
+                        ? t("已禁用此出口 IP")
+                        : blockEgressIPMutation.isPending
+                          ? t("禁用中...")
+                          : t("禁用此出口 IP")}
+                    </Button>
+                  </div>
+                ) : null}
               </section>
 
               <section className="platform-drawer-section">

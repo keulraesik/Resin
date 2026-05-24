@@ -177,6 +177,7 @@ export function PlatformPage() {
           {platforms.map((platform) => {
             const regionCount = platform.region_filters.length;
             const failoverCount = platform.region_failover_order.length;
+            const blockedIPCount = platform.blocked_egress_ips.length;
             const regexCount = platform.regex_filters.length;
             const stickyTTL = formatGoDuration(platform.sticky_ttl, t("默认"));
 
@@ -201,6 +202,10 @@ export function PlatformPage() {
                   <span className="platform-fact">
                     <span>{t("Region 回退")}</span>
                     <strong>{failoverCount}</strong>
+                  </span>
+                  <span className="platform-fact">
+                    <span>{t("禁用 IP")}</span>
+                    <strong>{blockedIPCount}</strong>
                   </span>
                   <span className="platform-fact">
                     <span>{t("正则")}</span>
@@ -427,6 +432,29 @@ export function PlatformPage() {
                 />
                 <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
                   {t("仅支持正向地区代码，不支持 ! 反选；顺序越靠前优先级越高。")}
+                </p>
+              </div>
+
+              <div className="field-group">
+                <label className="field-label field-label-with-info" htmlFor="create-blocked-egress-ips">
+                  <span>{t("禁用出口 IP（可选）")}</span>
+                  <span
+                    className="subscription-info-icon"
+                    title={t("当前平台不会分配这些出口 IP 上的节点。")}
+                    aria-label={t("当前平台不会分配这些出口 IP 上的节点。")}
+                    tabIndex={0}
+                  >
+                    <Info size={13} />
+                  </span>
+                </label>
+                <Textarea
+                  id="create-blocked-egress-ips"
+                  rows={4}
+                  placeholder={t("每行一个 IP，如 1.2.3.4 或 2001:db8::1")}
+                  {...createForm.register("blocked_egress_ips_text")}
+                />
+                <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                  {t("只支持单个 IPv4/IPv6 地址，不支持 CIDR、通配符或范围。")}
                 </p>
               </div>
 
