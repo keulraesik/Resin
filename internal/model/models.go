@@ -12,6 +12,7 @@ type Platform struct {
 	RegexFilters                     []string
 	RegionFilters                    []string
 	RegionFailoverOrder              []string `json:"region_failover_order"`
+	BlockedEgressIPs                 []string `json:"blocked_egress_ips"`
 	ReverseProxyMissAction           string   `json:"reverse_proxy_miss_action"`
 	ReverseProxyEmptyAccountBehavior string   `json:"reverse_proxy_empty_account_behavior"`
 	ReverseProxyFixedAccountHeader   string   `json:"reverse_proxy_fixed_account_header"`

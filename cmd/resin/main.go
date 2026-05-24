@@ -470,6 +470,7 @@ func ensureDefaultPlatform(
 		RegexFilters:                     append([]string(nil), envCfg.DefaultPlatformRegexFilters...),
 		RegionFilters:                    append([]string(nil), envCfg.DefaultPlatformRegionFilters...),
 		RegionFailoverOrder:              []string{},
+		BlockedEgressIPs:                 []string{},
 		ReverseProxyMissAction:           envCfg.DefaultPlatformReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: envCfg.DefaultPlatformReverseProxyEmptyAccountBehavior,
 		ReverseProxyFixedAccountHeader:   envCfg.DefaultPlatformReverseProxyFixedAccountHeader,

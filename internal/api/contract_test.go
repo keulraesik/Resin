@@ -1156,6 +1156,84 @@ func TestAPIContract_PlatformRegionFailoverOrder(t *testing.T) {
 	assertErrorCode(t, rec, "INVALID_ARGUMENT")
 }
 
+func TestAPIContract_PlatformBlockedEgressIPs(t *testing.T) {
+	srv, _, _ := newControlPlaneTestServer(t)
+
+	rec := doJSONRequest(t, srv, http.MethodPost, "/api/v1/platforms", map[string]any{
+		"name":               "blocked-egress-ips",
+		"blocked_egress_ips": []string{"192.0.2.10", "2001:0db8::1", "192.0.2.10"},
+	}, true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status: got %d, want %d, body=%s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	body := decodeJSONMap(t, rec)
+	if got := fmt.Sprint(body["blocked_egress_ips"]); got != "[192.0.2.10 2001:db8::1]" {
+		t.Fatalf("create blocked_egress_ips: got %v, want normalized unique IPs", body["blocked_egress_ips"])
+	}
+	platformID, _ := body["id"].(string)
+
+	rec = doJSONRequest(t, srv, http.MethodPatch, "/api/v1/platforms/"+platformID, map[string]any{
+		"blocked_egress_ips": []string{"198.51.100.7"},
+	}, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status: got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body = decodeJSONMap(t, rec)
+	if got := fmt.Sprint(body["blocked_egress_ips"]); got != "[198.51.100.7]" {
+		t.Fatalf("patch blocked_egress_ips: got %v, want [198.51.100.7]", body["blocked_egress_ips"])
+	}
+
+	rec = doJSONRequest(t, srv, http.MethodPatch, "/api/v1/platforms/"+platformID, map[string]any{
+		"blocked_egress_ips": []string{"not-an-ip"},
+	}, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid patch status: got %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	assertErrorCode(t, rec, "INVALID_ARGUMENT")
+}
+
+func TestAPIContract_BlockPlatformEgressIPAction(t *testing.T) {
+	srv, _, _ := newControlPlaneTestServer(t)
+	platformID := mustCreatePlatform(t, srv, "block-egress-action")
+
+	rec := doJSONRequest(t, srv, http.MethodPost, "/api/v1/platforms/"+platformID+"/actions/block-egress-ip", map[string]any{
+		"egress_ip": "2001:0db8::1",
+	}, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("block action status: got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := decodeJSONMap(t, rec)
+	if body["created"] != true {
+		t.Fatalf("created: got %v, want true", body["created"])
+	}
+	platformBody, ok := body["platform"].(map[string]any)
+	if !ok {
+		t.Fatalf("platform body type: got %T", body["platform"])
+	}
+	if got := fmt.Sprint(platformBody["blocked_egress_ips"]); got != "[2001:db8::1]" {
+		t.Fatalf("blocked_egress_ips: got %v, want [2001:db8::1]", platformBody["blocked_egress_ips"])
+	}
+
+	rec = doJSONRequest(t, srv, http.MethodPost, "/api/v1/platforms/"+platformID+"/actions/block-egress-ip", map[string]any{
+		"egress_ip": "2001:db8::1",
+	}, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("duplicate block action status: got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body = decodeJSONMap(t, rec)
+	if body["created"] != false {
+		t.Fatalf("duplicate created: got %v, want false", body["created"])
+	}
+
+	rec = doJSONRequest(t, srv, http.MethodPost, "/api/v1/platforms/"+platformID+"/actions/block-egress-ip", map[string]any{
+		"egress_ip": "not-an-ip",
+	}, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid block action status: got %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	assertErrorCode(t, rec, "INVALID_ARGUMENT")
+}
+
 func TestAPIContract_PlatformAccountRegions(t *testing.T) {
 	srv, cp, _ := newControlPlaneTestServer(t)
 	platformID := mustCreatePlatform(t, srv, "account-region-api")

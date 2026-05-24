@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"net/netip"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ func TestBuildFromModel_Success(t *testing.T) {
 		RegexFilters:                     []string{`^us-.*$`},
 		RegionFilters:                    []string{"us", "jp"},
 		RegionFailoverOrder:              []string{"us", "sg"},
+		BlockedEgressIPs:                 []string{"192.0.2.10", "2001:db8::1"},
 		ReverseProxyMissAction:           "REJECT",
 		ReverseProxyEmptyAccountBehavior: "FIXED_HEADER",
 		ReverseProxyFixedAccountHeader:   "x-account-id",
@@ -69,6 +71,9 @@ func TestBuildFromModel_Success(t *testing.T) {
 	}
 	if len(plat.RegionFailoverOrder) != 2 || plat.RegionFailoverOrder[0] != "us" || plat.RegionFailoverOrder[1] != "sg" {
 		t.Fatalf("region failover order mismatch: %+v", plat.RegionFailoverOrder)
+	}
+	if !plat.IsEgressIPBlocked(netip.MustParseAddr("192.0.2.10")) || !plat.IsEgressIPBlocked(netip.MustParseAddr("2001:db8::1")) {
+		t.Fatalf("blocked egress IP set mismatch: %+v", plat.BlockedEgressIPs)
 	}
 }
 
@@ -231,5 +236,26 @@ func TestValidateRegionFailoverOrder_Invalid(t *testing.T) {
 		if err := ValidateRegionFailoverOrder(tc); err == nil {
 			t.Fatalf("expected validation error for %v", tc)
 		}
+	}
+}
+
+func TestNormalizeBlockedEgressIPs(t *testing.T) {
+	got, err := NormalizeBlockedEgressIPs([]string{" 192.0.2.10 ", "2001:0db8::1", "", "192.0.2.10"})
+	if err != nil {
+		t.Fatalf("NormalizeBlockedEgressIPs: %v", err)
+	}
+	want := []string{"192.0.2.10", "2001:db8::1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized IPs: got %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeBlockedEgressIPs_Invalid(t *testing.T) {
+	_, err := NormalizeBlockedEgressIPs([]string{"192.0.2.10", "not-an-ip"})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "blocked_egress_ips[1]") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -29,6 +29,7 @@ type PlatformResponse struct {
 	RegexFilters                     []string `json:"regex_filters"`
 	RegionFilters                    []string `json:"region_filters"`
 	RegionFailoverOrder              []string `json:"region_failover_order"`
+	BlockedEgressIPs                 []string `json:"blocked_egress_ips"`
 	RoutableNodeCount                int      `json:"routable_node_count"`
 	ReverseProxyMissAction           string   `json:"reverse_proxy_miss_action"`
 	ReverseProxyEmptyAccountBehavior string   `json:"reverse_proxy_empty_account_behavior"`
@@ -49,6 +50,7 @@ func platformToResponse(p model.Platform) PlatformResponse {
 		RegexFilters:                     append([]string(nil), p.RegexFilters...),
 		RegionFilters:                    append([]string(nil), p.RegionFilters...),
 		RegionFailoverOrder:              append([]string(nil), p.RegionFailoverOrder...),
+		BlockedEgressIPs:                 append([]string(nil), p.BlockedEgressIPs...),
 		RoutableNodeCount:                0,
 		ReverseProxyMissAction:           p.ReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: behavior,
@@ -78,6 +80,7 @@ type platformConfig struct {
 	RegexFilters                     []string
 	RegionFilters                    []string
 	RegionFailoverOrder              []string
+	BlockedEgressIPs                 []string
 	ReverseProxyMissAction           string
 	ReverseProxyEmptyAccountBehavior string
 	ReverseProxyFixedAccountHeader   string
@@ -108,6 +111,7 @@ func (s *ControlPlaneService) defaultPlatformConfig(name string) platformConfig 
 		RegexFilters:           append([]string(nil), s.EnvCfg.DefaultPlatformRegexFilters...),
 		RegionFilters:          append([]string(nil), s.EnvCfg.DefaultPlatformRegionFilters...),
 		RegionFailoverOrder:    []string{},
+		BlockedEgressIPs:       []string{},
 		ReverseProxyMissAction: s.EnvCfg.DefaultPlatformReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: normalizePlatformEmptyAccountBehavior(
 			s.EnvCfg.DefaultPlatformReverseProxyEmptyAccountBehavior,
@@ -127,6 +131,7 @@ func platformConfigFromModel(mp model.Platform) platformConfig {
 		RegexFilters:                     append([]string(nil), mp.RegexFilters...),
 		RegionFilters:                    append([]string(nil), mp.RegionFilters...),
 		RegionFailoverOrder:              append([]string(nil), mp.RegionFailoverOrder...),
+		BlockedEgressIPs:                 append([]string(nil), mp.BlockedEgressIPs...),
 		ReverseProxyMissAction:           mp.ReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: normalizePlatformEmptyAccountBehavior(mp.ReverseProxyEmptyAccountBehavior),
 		ReverseProxyFixedAccountHeader:   normalizeHeaderFieldName(mp.ReverseProxyFixedAccountHeader),
@@ -144,6 +149,7 @@ func (cfg platformConfig) toModel(id string, updatedAtNs int64) model.Platform {
 		RegexFilters:                     append([]string(nil), cfg.RegexFilters...),
 		RegionFilters:                    append([]string(nil), cfg.RegionFilters...),
 		RegionFailoverOrder:              append([]string(nil), cfg.RegionFailoverOrder...),
+		BlockedEgressIPs:                 append([]string(nil), cfg.BlockedEgressIPs...),
 		ReverseProxyMissAction:           cfg.ReverseProxyMissAction,
 		ReverseProxyEmptyAccountBehavior: cfg.ReverseProxyEmptyAccountBehavior,
 		ReverseProxyFixedAccountHeader:   cfg.ReverseProxyFixedAccountHeader,
@@ -164,6 +170,7 @@ func (cfg platformConfig) toRuntime(id string) (*platform.Platform, error) {
 		compiledRegexFilters,
 		cfg.RegionFilters,
 		cfg.RegionFailoverOrder,
+		cfg.BlockedEgressIPs,
 		cfg.StickyTTLNs,
 		cfg.StickyTTLSliding,
 		cfg.ReverseProxyMissAction,
@@ -279,6 +286,11 @@ func validatePlatformConfig(cfg *platformConfig, validateRegionFilters bool) *Se
 	if err := platform.ValidateRegionFailoverOrder(cfg.RegionFailoverOrder); err != nil {
 		return invalidArg(err.Error())
 	}
+	blockedEgressIPs, err := platform.NormalizeBlockedEgressIPs(cfg.BlockedEgressIPs)
+	if err != nil {
+		return invalidArg(err.Error())
+	}
+	cfg.BlockedEgressIPs = blockedEgressIPs
 	if err := validatePlatformEmptyAccountConfig(cfg); err != nil {
 		return err
 	}
@@ -349,6 +361,7 @@ type CreatePlatformRequest struct {
 	RegexFilters                     []string `json:"regex_filters"`
 	RegionFilters                    []string `json:"region_filters"`
 	RegionFailoverOrder              []string `json:"region_failover_order"`
+	BlockedEgressIPs                 []string `json:"blocked_egress_ips"`
 	ReverseProxyMissAction           *string  `json:"reverse_proxy_miss_action"`
 	ReverseProxyEmptyAccountBehavior *string  `json:"reverse_proxy_empty_account_behavior"`
 	ReverseProxyFixedAccountHeader   *string  `json:"reverse_proxy_fixed_account_header"`
@@ -395,6 +408,9 @@ func (s *ControlPlaneService) CreatePlatform(req CreatePlatformRequest) (*Platfo
 	}
 	if req.RegionFailoverOrder != nil {
 		cfg.RegionFailoverOrder = req.RegionFailoverOrder
+	}
+	if req.BlockedEgressIPs != nil {
+		cfg.BlockedEgressIPs = req.BlockedEgressIPs
 	}
 	if req.ReverseProxyMissAction != nil {
 		if err := setPlatformMissAction(&cfg, *req.ReverseProxyMissAction); err != nil {
@@ -511,6 +527,11 @@ func (s *ControlPlaneService) UpdatePlatform(id string, patchJSON json.RawMessag
 	} else if ok {
 		cfg.RegionFailoverOrder = regions
 	}
+	if blockedEgressIPs, ok, err := patch.optionalStringSlice("blocked_egress_ips"); err != nil {
+		return nil, err
+	} else if ok {
+		cfg.BlockedEgressIPs = blockedEgressIPs
+	}
 
 	if ma, ok, err := patch.optionalString("reverse_proxy_miss_action"); err != nil {
 		return nil, err
@@ -560,6 +581,53 @@ func (s *ControlPlaneService) UpdatePlatform(id string, patchJSON json.RawMessag
 
 	r := s.withRoutableNodeCount(platformToResponse(mp))
 	return &r, nil
+}
+
+// BlockEgressIPResponse is the response for the platform block-egress-ip action.
+type BlockEgressIPResponse struct {
+	Platform PlatformResponse `json:"platform"`
+	Created  bool             `json:"created"`
+}
+
+// BlockPlatformEgressIP appends one blocked egress IP to a platform config.
+func (s *ControlPlaneService) BlockPlatformEgressIP(id string, rawEgressIP string) (*BlockEgressIPResponse, error) {
+	egressIP, err := platform.NormalizeBlockedEgressIP(rawEgressIP)
+	if err != nil {
+		return nil, invalidArg(err.Error())
+	}
+
+	current, err := s.getPlatformModel(id)
+	if err != nil {
+		return nil, err
+	}
+	cfg := platformConfigFromModel(*current)
+	normalized, normErr := platform.NormalizeBlockedEgressIPs(cfg.BlockedEgressIPs)
+	if normErr != nil {
+		return nil, invalidArg(normErr.Error())
+	}
+	cfg.BlockedEgressIPs = normalized
+	for _, existing := range cfg.BlockedEgressIPs {
+		if existing == egressIP {
+			r := s.withRoutableNodeCount(platformToResponse(*current))
+			return &BlockEgressIPResponse{Platform: r, Created: false}, nil
+		}
+	}
+
+	cfg.BlockedEgressIPs = append(cfg.BlockedEgressIPs, egressIP)
+	if err := validatePlatformConfig(&cfg, false); err != nil {
+		return nil, err
+	}
+
+	mp, plat, svcErr := s.compileAndUpsertPlatform(id, cfg)
+	if svcErr != nil {
+		return nil, svcErr
+	}
+	if err := s.Pool.ReplacePlatform(plat); err != nil {
+		return nil, internal("replace platform in pool", err)
+	}
+
+	r := s.withRoutableNodeCount(platformToResponse(mp))
+	return &BlockEgressIPResponse{Platform: r, Created: true}, nil
 }
 
 // DeletePlatform deletes a platform.

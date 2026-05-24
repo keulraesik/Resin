@@ -27,6 +27,11 @@ func platformMatchesKeyword(p service.PlatformResponse, keyword string) bool {
 			return true
 		}
 	}
+	for _, item := range p.BlockedEgressIPs {
+		if contains(item) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -200,6 +205,32 @@ func HandleRebuildPlatform(cp *service.ControlPlaneService) http.HandlerFunc {
 			return
 		}
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+type blockEgressIPRequest struct {
+	EgressIP string `json:"egress_ip"`
+}
+
+// HandleBlockPlatformEgressIP returns a handler for POST /api/v1/platforms/{id}/actions/block-egress-ip.
+func HandleBlockPlatformEgressIP(cp *service.ControlPlaneService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := requireUUIDPathParam(w, r, "id", "platform_id")
+		if !ok {
+			return
+		}
+
+		var req blockEgressIPRequest
+		if err := DecodeBody(r, &req); err != nil {
+			writeDecodeBodyError(w, err)
+			return
+		}
+		result, err := cp.BlockPlatformEgressIP(id, req.EgressIP)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, result)
 	}
 }
 

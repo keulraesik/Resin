@@ -32,6 +32,7 @@ type Platform struct {
 	RegexFilters        []*regexp.Regexp
 	RegionFilters       []string // lowercase ISO codes, supports negation "!xx"
 	RegionFailoverOrder []string // lowercase ISO codes, strict sticky failover priority
+	BlockedEgressIPs    map[netip.Addr]struct{}
 
 	// Other config fields.
 	StickyTTLNs                      int64
@@ -136,6 +137,9 @@ func (p *Platform) evaluateNode(
 	if !egressIP.IsValid() {
 		return false
 	}
+	if p.IsEgressIPBlocked(egressIP) {
+		return false
+	}
 
 	// 4. Region filter (when configured).
 	if len(p.RegionFilters) > 0 {
@@ -151,6 +155,15 @@ func (p *Platform) evaluateNode(
 	}
 
 	return true
+}
+
+// IsEgressIPBlocked reports whether an egress IP is explicitly disabled for this platform.
+func (p *Platform) IsEgressIPBlocked(ip netip.Addr) bool {
+	if p == nil || !ip.IsValid() || len(p.BlockedEgressIPs) == 0 {
+		return false
+	}
+	_, blocked := p.BlockedEgressIPs[ip]
+	return blocked
 }
 
 // MatchRegionFilter applies include/exclude region filters.

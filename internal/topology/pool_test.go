@@ -265,6 +265,46 @@ func TestPool_PlatformNotifyOnAddRemove(t *testing.T) {
 	}
 }
 
+func TestPool_PlatformViewExcludesBlockedEgressIP(t *testing.T) {
+	subMgr := NewSubscriptionManager()
+	sub := subscription.NewSubscription("s1", "Sub1", "url", true, false)
+	subMgr.Register(sub)
+
+	pool := newTestPool(subMgr)
+	blockedIP := netip.MustParseAddr("1.2.3.4")
+	plat := platform.NewPlatform("p1", "TestPlat", nil, nil)
+	plat.BlockedEgressIPs = map[netip.Addr]struct{}{blockedIP: {}}
+	pool.RegisterPlatform(plat)
+
+	raw := json.RawMessage(`{"type":"ss","server":"1.1.1.1"}`)
+	h := node.HashFromRawOptions(raw)
+	mn := subscription.NewManagedNodes()
+	mn.StoreNode(h, subscription.ManagedNode{Tags: []string{"node-1"}})
+	sub.SwapManagedNodes(mn)
+	pool.AddNodeFromSub(h, raw, "s1")
+
+	entry, _ := pool.GetEntry(h)
+	entry.LatencyTable.LoadEntry("example.com", node.DomainLatencyStats{
+		Ewma:        100 * time.Millisecond,
+		LastUpdated: time.Now(),
+	})
+	ob := testutil.NewNoopOutbound()
+	entry.Outbound.Store(&ob)
+	entry.SetEgressIP(blockedIP)
+	pool.RecordResult(h, true)
+
+	pool.NotifyNodeDirty(h)
+	if plat.View().Contains(h) {
+		t.Fatal("node with blocked egress IP should not be in platform view")
+	}
+
+	entry.SetEgressIP(netip.MustParseAddr("1.2.3.5"))
+	pool.NotifyNodeDirty(h)
+	if !plat.View().Contains(h) {
+		t.Fatal("node should re-enter platform view after moving away from blocked egress IP")
+	}
+}
+
 func TestPool_NotifyNodeDirty_UpdatesPlatformsInParallel(t *testing.T) {
 	subMgr := NewSubscriptionManager()
 	sub := subscription.NewSubscription("s1", "Sub1", "url", true, false)

@@ -96,6 +96,7 @@ var platformPatchAllowedFields = map[string]bool{
 	"regex_filters":                        true,
 	"region_filters":                       true,
 	"region_failover_order":                true,
+	"blocked_egress_ips":                   true,
 	"reverse_proxy_miss_action":            true,
 	"reverse_proxy_empty_account_behavior": true,
 	"reverse_proxy_fixed_account_header":   true,

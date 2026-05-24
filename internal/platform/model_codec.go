@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"net/netip"
 	"regexp"
 	"strings"
 
@@ -45,6 +46,60 @@ func ValidateRegionFailoverOrder(regions []string) error {
 	return nil
 }
 
+func normalizeIPAddr(raw string) (string, error) {
+	ip, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	return ip.String(), nil
+}
+
+// NormalizeBlockedEgressIPs validates, canonicalizes, and deduplicates blocked egress IPs.
+func NormalizeBlockedEgressIPs(values []string) ([]string, error) {
+	normalized := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for i, raw := range values {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		ip, err := normalizeIPAddr(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("blocked_egress_ips[%d]: must be a valid IPv4 or IPv6 address", i)
+		}
+		if _, exists := seen[ip]; exists {
+			continue
+		}
+		seen[ip] = struct{}{}
+		normalized = append(normalized, ip)
+	}
+	return normalized, nil
+}
+
+// NormalizeBlockedEgressIP validates and canonicalizes one blocked egress IP.
+func NormalizeBlockedEgressIP(raw string) (string, error) {
+	ip, err := normalizeIPAddr(raw)
+	if err != nil {
+		return "", fmt.Errorf("egress_ip: must be a valid IPv4 or IPv6 address")
+	}
+	return ip, nil
+}
+
+func blockedEgressIPSet(values []string) map[netip.Addr]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	set := make(map[netip.Addr]struct{}, len(values))
+	for _, raw := range values {
+		ip, err := netip.ParseAddr(strings.TrimSpace(raw))
+		if err != nil {
+			continue
+		}
+		set[ip] = struct{}{}
+	}
+	return set
+}
+
 // CompileRegexFilters compiles regex filters in order.
 func CompileRegexFilters(regexFilters []string) ([]*regexp.Regexp, error) {
 	compiled := make([]*regexp.Regexp, 0, len(regexFilters))
@@ -64,6 +119,7 @@ func NewConfiguredPlatform(
 	regexFilters []*regexp.Regexp,
 	regionFilters []string,
 	regionFailoverOrder []string,
+	blockedEgressIPs []string,
 	stickyTTLNs int64,
 	stickyTTLSliding bool,
 	missAction string,
@@ -79,6 +135,7 @@ func NewConfiguredPlatform(
 	}
 	plat := NewPlatform(id, name, regexFilters, regionFilters)
 	plat.RegionFailoverOrder = append([]string(nil), regionFailoverOrder...)
+	plat.BlockedEgressIPs = blockedEgressIPSet(blockedEgressIPs)
 	plat.StickyTTLNs = stickyTTLNs
 	plat.StickyTTLSliding = stickyTTLSliding
 	plat.ReverseProxyMissAction = missAction
@@ -111,6 +168,10 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 	if err := ValidateRegionFailoverOrder(mp.RegionFailoverOrder); err != nil {
 		return nil, err
 	}
+	blockedEgressIPs, err := NormalizeBlockedEgressIPs(mp.BlockedEgressIPs)
+	if err != nil {
+		return nil, err
+	}
 	emptyAccountBehavior := mp.ReverseProxyEmptyAccountBehavior
 	if !ReverseProxyEmptyAccountBehavior(emptyAccountBehavior).IsValid() {
 		emptyAccountBehavior = string(ReverseProxyEmptyAccountBehaviorRandom)
@@ -141,6 +202,7 @@ func BuildFromModel(mp model.Platform) (*Platform, error) {
 		regexFilters,
 		append([]string(nil), mp.RegionFilters...),
 		append([]string(nil), mp.RegionFailoverOrder...),
+		blockedEgressIPs,
 		mp.StickyTTLNs,
 		mp.StickyTTLSliding,
 		string(missAction),

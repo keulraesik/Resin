@@ -27,6 +27,7 @@ const (
 	stateVersionAddPassiveCircuitBreakerDisabled = 6
 	stateVersionAddStickyTTLSliding              = 7
 	stateVersionAddPlatformRegionAffinity        = 8
+	stateVersionAddPlatformBlockedEgressIPs      = 9
 	stateLegacyBaselineVersion                   = stateVersionAddFixedAccountHeader
 
 	stateBaseSchemaMigration = stateMigrationsPath + "/000001_state_base.up.sql"
@@ -126,12 +127,19 @@ func prepareLegacyStateBaseline(db *sql.DB, driver migratedb.Driver) error {
 	if err != nil {
 		return err
 	}
+	hasBlockedEgressIPs, err := hasTableColumn(db, "platforms", "blocked_egress_ips_json")
+	if err != nil {
+		return err
+	}
 	hasIncrementalAliveNodes, err := hasTableColumn(db, "subscriptions", "incremental_alive_nodes")
 	if err != nil {
 		return err
 	}
 
 	switch {
+	case hasEmptyBehavior && hasFixedHeader && hasIncrementalAliveNodes && hasPassiveCircuitBreakerDisabled &&
+		hasStickyTTLSliding && hasRegionFailoverOrder && hasAccountRegions && hasBlockedEgressIPs:
+		return setLegacyMigrationVersion(db, driver, stateVersionAddPlatformBlockedEgressIPs)
 	case hasEmptyBehavior && hasFixedHeader && hasIncrementalAliveNodes && hasPassiveCircuitBreakerDisabled &&
 		hasStickyTTLSliding && hasRegionFailoverOrder && hasAccountRegions:
 		return setLegacyMigrationVersion(db, driver, stateVersionAddPlatformRegionAffinity)

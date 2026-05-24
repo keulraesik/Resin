@@ -885,6 +885,7 @@ func TestDeletePlatform_DoesNotDecodeCorruptPersistedFiltersJSON(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		platformRow.StickyTTLNs,
 		platformRow.StickyTTLSliding,
 		platformRow.ReverseProxyMissAction,
@@ -948,6 +949,7 @@ func TestResetPlatformToDefault_SupportsBuiltInDefaultPlatform(t *testing.T) {
 	pool.RegisterPlatform(platform.NewConfiguredPlatform(
 		defaultRow.ID,
 		defaultRow.Name,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -1101,6 +1103,7 @@ func TestResetPlatformToDefault_DoesNotDecodeCorruptPersistedFiltersJSON(t *test
 	pool.RegisterPlatform(platform.NewConfiguredPlatform(
 		platformRow.ID,
 		platformRow.Name,
+		nil,
 		nil,
 		nil,
 		nil,

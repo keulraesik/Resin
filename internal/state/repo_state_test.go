@@ -109,8 +109,8 @@ func TestMigrateStateDB_LegacyBaselineAdvancesToLatest(t *testing.T) {
 	if dirty {
 		t.Fatalf("schema_migrations dirty=true")
 	}
-	if version != stateVersionAddPlatformRegionAffinity {
-		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformRegionAffinity)
+	if version != stateVersionAddPlatformBlockedEgressIPs {
+		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformBlockedEgressIPs)
 	}
 	if ok, err := hasTableColumn(db, "subscriptions", "incremental_alive_nodes"); err != nil || !ok {
 		t.Fatalf("expected migrated column subscriptions.incremental_alive_nodes, ok=%v err=%v", ok, err)
@@ -185,8 +185,8 @@ func TestMigrateStateDB_AddsIncrementalAliveNodesToLegacySubscriptions(t *testin
 	if dirty {
 		t.Fatalf("schema_migrations dirty=true")
 	}
-	if version != stateVersionAddPlatformRegionAffinity {
-		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformRegionAffinity)
+	if version != stateVersionAddPlatformBlockedEgressIPs {
+		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformBlockedEgressIPs)
 	}
 	if ok, err := hasTableColumn(db, "platforms", "passive_circuit_breaker_disabled"); err != nil || !ok {
 		t.Fatalf("expected migrated column platforms.passive_circuit_breaker_disabled, ok=%v err=%v", ok, err)
@@ -269,8 +269,8 @@ func TestMigrateStateDB_NormalizesLegacyRandomMissAction(t *testing.T) {
 	if dirty {
 		t.Fatalf("schema_migrations dirty=true")
 	}
-	if version != stateVersionAddPlatformRegionAffinity {
-		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformRegionAffinity)
+	if version != stateVersionAddPlatformBlockedEgressIPs {
+		t.Fatalf("schema_migrations version: got %d, want %d", version, stateVersionAddPlatformBlockedEgressIPs)
 	}
 	if ok, err := hasTableColumn(db, "subscriptions", "incremental_alive_nodes"); err != nil || !ok {
 		t.Fatalf("expected migrated column subscriptions.incremental_alive_nodes, ok=%v err=%v", ok, err)
@@ -347,6 +347,7 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 		ID: "plat-1", Name: "Default", StickyTTLNs: 1000,
 		RegexFilters: []string{}, RegionFilters: []string{},
 		RegionFailoverOrder:    []string{"us", "jp"},
+		BlockedEgressIPs:       []string{"192.0.2.10", "2001:0db8::1", "192.0.2.10"},
 		ReverseProxyMissAction: "TREAT_AS_EMPTY", AllocationPolicy: "BALANCED",
 		PassiveCircuitBreakerDisabled: true,
 		StickyTTLSliding:              true,
@@ -379,6 +380,9 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	if !reflect.DeepEqual(got.RegionFailoverOrder, []string{"us", "jp"}) {
 		t.Fatalf("region_failover_order: got %v, want %v", got.RegionFailoverOrder, []string{"us", "jp"})
 	}
+	if !reflect.DeepEqual(got.BlockedEgressIPs, []string{"192.0.2.10", "2001:db8::1"}) {
+		t.Fatalf("blocked_egress_ips: got %v, want normalized unique IPs", got.BlockedEgressIPs)
+	}
 
 	// List.
 	list, err := repo.ListPlatforms()
@@ -394,6 +398,7 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	p.PassiveCircuitBreakerDisabled = false
 	p.StickyTTLSliding = false
 	p.RegionFailoverOrder = []string{"sg"}
+	p.BlockedEgressIPs = []string{"198.51.100.7"}
 	if err := repo.UpsertPlatform(p); err != nil {
 		t.Fatal(err)
 	}
@@ -412,6 +417,9 @@ func TestStateRepo_Platforms_CRUD(t *testing.T) {
 	}
 	if !reflect.DeepEqual(list[0].RegionFailoverOrder, []string{"sg"}) {
 		t.Fatalf("expected region_failover_order to update, got %v", list[0].RegionFailoverOrder)
+	}
+	if !reflect.DeepEqual(list[0].BlockedEgressIPs, []string{"198.51.100.7"}) {
+		t.Fatalf("expected blocked_egress_ips to update, got %v", list[0].BlockedEgressIPs)
 	}
 
 	// Delete.
@@ -529,10 +537,18 @@ func TestStateRepo_Platform_ValidationRejectsInvalidRegex(t *testing.T) {
 		t.Fatal("expected error for invalid region_failover_order")
 	}
 
+	// Invalid blocked_egress_ips.
+	bad = base
+	bad.BlockedEgressIPs = []string{"not-an-ip"}
+	if err := repo.UpsertPlatform(bad); err == nil {
+		t.Fatal("expected error for invalid blocked_egress_ips")
+	}
+
 	// Valid config should still succeed.
 	base.RegexFilters = []string{"^ss$", "vmess"}
 	base.RegionFilters = []string{"us", "jp"}
 	base.RegionFailoverOrder = []string{"us", "jp"}
+	base.BlockedEgressIPs = []string{"192.0.2.10"}
 	if err := repo.UpsertPlatform(base); err != nil {
 		t.Fatalf("valid platform rejected: %v", err)
 	}
