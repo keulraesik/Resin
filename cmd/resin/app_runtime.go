@@ -20,6 +20,7 @@ import (
 	"github.com/Resinat/Resin/internal/config"
 	"github.com/Resinat/Resin/internal/geoip"
 	"github.com/Resinat/Resin/internal/metrics"
+	"github.com/Resinat/Resin/internal/model"
 	"github.com/Resinat/Resin/internal/netutil"
 	"github.com/Resinat/Resin/internal/node"
 	"github.com/Resinat/Resin/internal/proxy"
@@ -155,6 +156,8 @@ func (a *resinApp) initTopologyRuntime(engine *state.StateEngine) (*netutil.Retr
 			return time.Duration(runtimeConfigSnapshot(a.runtimeCfg).P2CLatencyWindow)
 		},
 		NodeTagResolver: a.topoRuntime.pool.ResolveNodeDisplayTag,
+		GeoLookup:       a.geoSvc.Lookup,
+		AccountRegions:  stateAccountRegionStore{engine: engine},
 		// Lease events are emitted synchronously on routing paths.
 		// Keep this callback lightweight and non-blocking.
 		OnLeaseEvent: func(e routing.LeaseEvent) {
@@ -170,6 +173,47 @@ func (a *resinApp) initTopologyRuntime(engine *state.StateEngine) (*netutil.Retr
 	a.topoRuntime.leaseCleaner = routing.NewLeaseCleaner(a.topoRuntime.router)
 	log.Println("Router and LeaseCleaner initialized")
 	return retryDL, nil
+}
+
+type stateAccountRegionStore struct {
+	engine *state.StateEngine
+}
+
+func (s stateAccountRegionStore) GetAccountRegion(platformID, account string) (string, bool) {
+	if s.engine == nil {
+		return "", false
+	}
+	ar, err := s.engine.GetAccountRegion(platformID, account)
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			return "", false
+		}
+		log.Printf("Warning: load account region: %v", err)
+		return "", false
+	}
+	if ar == nil {
+		return "", false
+	}
+	return ar.PrimaryRegion, true
+}
+
+func (s stateAccountRegionStore) EnsureAccountRegion(platformID, account, region string) bool {
+	if s.engine == nil {
+		return false
+	}
+	now := time.Now().UnixNano()
+	created, err := s.engine.EnsureAccountRegion(model.AccountRegion{
+		PlatformID:    platformID,
+		Account:       account,
+		PrimaryRegion: region,
+		CreatedAtNs:   now,
+		UpdatedAtNs:   now,
+	})
+	if err != nil {
+		log.Printf("Warning: ensure account region: %v", err)
+		return false
+	}
+	return created
 }
 
 func (a *resinApp) onProbeConnectionLifecycle(op netutil.ConnLifecycleOp) {

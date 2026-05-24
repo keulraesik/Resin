@@ -91,6 +91,53 @@ func randomRoute(
 	return selected, nil
 }
 
+func randomRouteFromCandidates(
+	plat *platform.Platform,
+	stats *IPLoadStats,
+	pool PoolAccessor,
+	candidates []node.Hash,
+	targetDomain string,
+	authorities []string,
+	p2cWindow time.Duration,
+) (node.Hash, error) {
+	size := len(candidates)
+	if size == 0 {
+		return node.Zero, ErrNoAvailableNodes
+	}
+
+	rng := randomRouteRNGPool.Get().(*rand.Rand)
+	defer randomRouteRNGPool.Put(rng)
+
+	h1 := candidates[rng.IntN(size)]
+	if size == 1 {
+		return h1, nil
+	}
+
+	h2 := candidates[rng.IntN(size)]
+	if h2 == h1 {
+		for i := 0; i < 3; i++ {
+			candidate := candidates[rng.IntN(size)]
+			if candidate != h1 {
+				h2 = candidate
+				break
+			}
+		}
+		if h2 == h1 {
+			return h1, nil
+		}
+	}
+
+	lat1, lat2 := compareLatencies(h1, h2, pool, targetDomain, authorities, p2cWindow)
+	s1 := calculateScore(h1, lat1, plat, stats, pool)
+	s2 := calculateScore(h2, lat2, plat, stats, pool)
+
+	selected := h2
+	if s1 < s2 {
+		selected = h1
+	}
+	return selected, nil
+}
+
 // compareLatencies determines the latency values for h1 and h2.
 // Implements the 3-level comparison logic:
 // 1. Target domain present in both and recent.

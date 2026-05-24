@@ -26,6 +26,12 @@ type PoolAccessor interface {
 	RangePlatforms(fn func(*platform.Platform) bool)
 }
 
+// AccountRegionStore persists stable per-account primary region affinity.
+type AccountRegionStore interface {
+	GetAccountRegion(platformID, account string) (string, bool)
+	EnsureAccountRegion(platformID, account, region string) bool
+}
+
 // Router handles route selection and lease management.
 type Router struct {
 	pool            PoolAccessor
@@ -34,6 +40,8 @@ type Router struct {
 	p2cWindow       func() time.Duration
 	onLeaseEvent    LeaseEventFunc
 	nodeTagResolver func(node.Hash) string
+	geoLookup       platform.GeoLookupFunc
+	accountRegions  AccountRegionStore
 }
 
 type RouterConfig struct {
@@ -45,6 +53,8 @@ type RouterConfig struct {
 	// NodeTagResolver resolves a node hash to its display tag ("<Sub>/<Tag>").
 	// If nil, NodeTag will be empty.
 	NodeTagResolver func(node.Hash) string
+	GeoLookup       platform.GeoLookupFunc
+	AccountRegions  AccountRegionStore
 }
 
 func NewRouter(cfg RouterConfig) *Router {
@@ -55,6 +65,8 @@ func NewRouter(cfg RouterConfig) *Router {
 		p2cWindow:       cfg.P2CWindow,
 		onLeaseEvent:    cfg.OnLeaseEvent,
 		nodeTagResolver: cfg.NodeTagResolver,
+		geoLookup:       cfg.GeoLookup,
+		accountRegions:  cfg.AccountRegions,
 	}
 }
 
@@ -200,6 +212,7 @@ func (r *Router) decideStickyLease(
 			return newLease, xsync.UpdateOp, hitResult, nil
 		}
 		if newLease, rotatedResult, ok := r.tryLeaseSameIPRotation(plat, account, current, targetDomain, now, nowNs); ok {
+			r.ensurePrimaryRegionForSelection(plat, account, newLease.NodeHash)
 			return newLease, xsync.UpdateOp, rotatedResult, nil
 		}
 		invalidation = leaseInvalidationRemove
@@ -229,7 +242,16 @@ func (r *Router) createOrAbortStickyLease(
 	hadPreviousLease bool,
 	invalidation leaseInvalidationReason,
 ) (Lease, xsync.ComputeOp, RouteResult, error) {
-	newLease, createdResult, err := r.createLease(plat, state, targetDomain, now, nowNs)
+	newLease, createdResult, err := r.createLeasePreferSameIP(
+		plat,
+		state,
+		account,
+		targetDomain,
+		now,
+		nowNs,
+		previous,
+		hadPreviousLease,
+	)
 	if err != nil {
 		r.cleanupPreviousLease(state, previous, hadPreviousLease, invalidation, plat.ID, account)
 		lease, op := abortLeaseCreate(previous, hadPreviousLease)
@@ -237,6 +259,7 @@ func (r *Router) createOrAbortStickyLease(
 	}
 
 	r.cleanupPreviousLease(state, previous, hadPreviousLease, invalidation, plat.ID, account)
+	r.ensurePrimaryRegionForSelection(plat, account, newLease.NodeHash)
 	state.IPLoadStats.Inc(newLease.EgressIP)
 	r.emitLeaseEvent(LeaseEvent{
 		Type:       LeaseCreate,
@@ -330,22 +353,60 @@ func effectiveStickyTTL(plat *platform.Platform) int64 {
 	return int64(24 * time.Hour)
 }
 
-func (r *Router) createLease(
+func (r *Router) createLeaseForAccount(
 	plat *platform.Platform,
 	state *PlatformRoutingState,
+	account string,
 	targetDomain string,
 	now time.Time,
 	nowNs int64,
 ) (Lease, RouteResult, error) {
-	h, entry, err := r.selectLiveRandomRoute(plat, state.IPLoadStats, targetDomain)
+	h, entry, err := r.selectLiveStickyRoute(plat, state.IPLoadStats, account, targetDomain)
 	if err != nil {
 		return Lease{}, RouteResult{}, err
 	}
-	ttl := effectiveStickyTTL(plat)
+	lease, result := makeLeaseResult(h, entry.GetEgressIP(), now, nowNs, effectiveStickyTTL(plat))
+	return lease, result, nil
+}
 
+func (r *Router) createLeasePreferSameIP(
+	plat *platform.Platform,
+	state *PlatformRoutingState,
+	account string,
+	targetDomain string,
+	now time.Time,
+	nowNs int64,
+	previous Lease,
+	hadPreviousLease bool,
+) (Lease, RouteResult, error) {
+	if hadPreviousLease && previous.EgressIP.IsValid() {
+		if h, ok := chooseSameIPRotationCandidate(
+			plat,
+			r.pool,
+			previous.EgressIP,
+			targetDomain,
+			r.authorities(),
+			r.p2cWindow(),
+		); ok {
+			if entry, exists := r.pool.GetEntry(h); exists && entry.GetEgressIP() == previous.EgressIP {
+				lease, result := makeLeaseResult(h, previous.EgressIP, now, nowNs, effectiveStickyTTL(plat))
+				return lease, result, nil
+			}
+		}
+	}
+	return r.createLeaseForAccount(plat, state, account, targetDomain, now, nowNs)
+}
+
+func makeLeaseResult(
+	h node.Hash,
+	egressIP netip.Addr,
+	now time.Time,
+	nowNs int64,
+	ttl int64,
+) (Lease, RouteResult) {
 	lease := Lease{
 		NodeHash:       h,
-		EgressIP:       entry.GetEgressIP(),
+		EgressIP:       egressIP,
 		CreatedAtNs:    nowNs,
 		ExpiryNs:       now.Add(time.Duration(ttl)).UnixNano(),
 		LastAccessedNs: nowNs,
@@ -354,7 +415,7 @@ func (r *Router) createLease(
 		NodeHash:     lease.NodeHash,
 		EgressIP:     lease.EgressIP,
 		LeaseCreated: true,
-	}, nil
+	}
 }
 
 func (r *Router) cleanupPreviousLease(
@@ -425,6 +486,174 @@ func (r *Router) selectLiveRandomRoute(
 		return node.Zero, nil, fmt.Errorf("%w: selected node %s no longer in pool", ErrNoAvailableNodes, lastMissing.Hex())
 	}
 	return node.Zero, nil, ErrNoAvailableNodes
+}
+
+func (r *Router) selectLiveStickyRoute(
+	plat *platform.Platform,
+	stats *IPLoadStats,
+	account string,
+	targetDomain string,
+) (node.Hash, *node.NodeEntry, error) {
+	var lastMissing node.Hash
+	for i := 0; i < livePickAttempts; i++ {
+		h, err := r.selectStickyRoute(plat, stats, account, targetDomain)
+		if err != nil {
+			return node.Zero, nil, err
+		}
+		entry, ok := r.pool.GetEntry(h)
+		if ok {
+			return h, entry, nil
+		}
+		lastMissing = h
+	}
+	if lastMissing != node.Zero {
+		return node.Zero, nil, fmt.Errorf("%w: selected node %s no longer in pool", ErrNoAvailableNodes, lastMissing.Hex())
+	}
+	return node.Zero, nil, ErrNoAvailableNodes
+}
+
+func (r *Router) selectStickyRoute(
+	plat *platform.Platform,
+	stats *IPLoadStats,
+	account string,
+	targetDomain string,
+) (node.Hash, error) {
+	primary, hasPrimary := r.lookupPrimaryRegion(plat.ID, account)
+	if hasPrimary {
+		if h, ok := r.selectRouteInRegion(plat, stats, primary, targetDomain); ok {
+			return h, nil
+		}
+	}
+
+	for _, region := range stickyRegionOrder(primary, hasPrimary, plat.RegionFailoverOrder) {
+		if h, ok := r.selectRouteInRegion(plat, stats, region, targetDomain); ok {
+			return h, nil
+		}
+	}
+
+	if h, ok := r.selectRouteWithKnownRegion(plat, stats, targetDomain); ok {
+		return h, nil
+	}
+
+	return randomRoute(plat, stats, r.pool, targetDomain, r.authorities(), r.p2cWindow())
+}
+
+func stickyRegionOrder(primary string, hasPrimary bool, failoverOrder []string) []string {
+	order := make([]string, 0, len(failoverOrder))
+	seen := map[string]struct{}{}
+	if hasPrimary && primary != "" {
+		seen[primary] = struct{}{}
+	}
+	for _, region := range failoverOrder {
+		if _, exists := seen[region]; exists {
+			continue
+		}
+		seen[region] = struct{}{}
+		order = append(order, region)
+	}
+	return order
+}
+
+func (r *Router) selectRouteInRegion(
+	plat *platform.Platform,
+	stats *IPLoadStats,
+	region string,
+	targetDomain string,
+) (node.Hash, bool) {
+	candidates := r.candidatesByRegion(plat, region)
+	if len(candidates) == 0 {
+		return node.Zero, false
+	}
+	h, err := randomRouteFromCandidates(
+		plat,
+		stats,
+		r.pool,
+		candidates,
+		targetDomain,
+		r.authorities(),
+		r.p2cWindow(),
+	)
+	return h, err == nil
+}
+
+func (r *Router) selectRouteWithKnownRegion(
+	plat *platform.Platform,
+	stats *IPLoadStats,
+	targetDomain string,
+) (node.Hash, bool) {
+	candidates := r.candidatesWithKnownRegion(plat)
+	if len(candidates) == 0 {
+		return node.Zero, false
+	}
+	h, err := randomRouteFromCandidates(
+		plat,
+		stats,
+		r.pool,
+		candidates,
+		targetDomain,
+		r.authorities(),
+		r.p2cWindow(),
+	)
+	return h, err == nil
+}
+
+func (r *Router) candidatesByRegion(plat *platform.Platform, region string) []node.Hash {
+	var candidates []node.Hash
+	plat.View().Range(func(h node.Hash) bool {
+		entry, ok := r.pool.GetEntry(h)
+		if !ok {
+			return true
+		}
+		if r.nodeRegion(entry) == region {
+			candidates = append(candidates, h)
+		}
+		return true
+	})
+	return candidates
+}
+
+func (r *Router) candidatesWithKnownRegion(plat *platform.Platform) []node.Hash {
+	var candidates []node.Hash
+	plat.View().Range(func(h node.Hash) bool {
+		entry, ok := r.pool.GetEntry(h)
+		if !ok {
+			return true
+		}
+		if r.nodeRegion(entry) != "" {
+			candidates = append(candidates, h)
+		}
+		return true
+	})
+	return candidates
+}
+
+func (r *Router) nodeRegion(entry *node.NodeEntry) string {
+	if entry == nil {
+		return ""
+	}
+	return entry.GetRegion(r.geoLookup)
+}
+
+func (r *Router) lookupPrimaryRegion(platformID, account string) (string, bool) {
+	if r.accountRegions == nil {
+		return "", false
+	}
+	return r.accountRegions.GetAccountRegion(platformID, account)
+}
+
+func (r *Router) ensurePrimaryRegionForSelection(plat *platform.Platform, account string, h node.Hash) {
+	if r.accountRegions == nil || plat == nil || account == "" {
+		return
+	}
+	entry, ok := r.pool.GetEntry(h)
+	if !ok {
+		return
+	}
+	region := r.nodeRegion(entry)
+	if region == "" {
+		return
+	}
+	r.accountRegions.EnsureAccountRegion(plat.ID, account, region)
 }
 
 func chooseSameIPRotationCandidate(

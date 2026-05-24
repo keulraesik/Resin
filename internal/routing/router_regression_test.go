@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Resinat/Resin/internal/model"
 	"github.com/Resinat/Resin/internal/node"
 	"github.com/Resinat/Resin/internal/platform"
 	"github.com/Resinat/Resin/internal/testutil"
@@ -18,6 +19,33 @@ type routerTestPool struct {
 	entries     map[node.Hash]*node.NodeEntry
 	platsByID   map[string]*platform.Platform
 	platsByName map[string]*platform.Platform
+}
+
+type memoryAccountRegionStore struct {
+	mu      sync.Mutex
+	regions map[model.AccountRegionKey]string
+}
+
+func newMemoryAccountRegionStore() *memoryAccountRegionStore {
+	return &memoryAccountRegionStore{regions: map[model.AccountRegionKey]string{}}
+}
+
+func (s *memoryAccountRegionStore) GetAccountRegion(platformID, account string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	region, ok := s.regions[model.AccountRegionKey{PlatformID: platformID, Account: account}]
+	return region, ok
+}
+
+func (s *memoryAccountRegionStore) EnsureAccountRegion(platformID, account, region string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := model.AccountRegionKey{PlatformID: platformID, Account: account}
+	if _, exists := s.regions[key]; exists {
+		return false
+	}
+	s.regions[key] = region
+	return true
 }
 
 func newRouterTestPool() *routerTestPool {
@@ -129,6 +157,13 @@ func newRoutableEntry(t *testing.T, raw, ip string) (node.Hash, *node.NodeEntry)
 	return h, e
 }
 
+func newRoutableEntryWithRegion(t *testing.T, raw, ip, region string) (node.Hash, *node.NodeEntry) {
+	t.Helper()
+	h, e := newRoutableEntry(t, raw, ip)
+	e.SetEgressRegion(region)
+	return h, e
+}
+
 func waitForDomainLatency(t *testing.T, e *node.NodeEntry, domain string) {
 	t.Helper()
 	deadline := time.Now().Add(250 * time.Millisecond)
@@ -157,6 +192,186 @@ func newTestRouter(pool PoolAccessor, onEvent LeaseEventFunc) *Router {
 		P2CWindow:    func() time.Duration { return 10 * time.Minute },
 		OnLeaseEvent: onEvent,
 	})
+}
+
+func newTestRouterWithAccountRegions(pool PoolAccessor, store AccountRegionStore) *Router {
+	return NewRouter(RouterConfig{
+		Pool:           pool,
+		Authorities:    func() []string { return []string{"cloudflare.com"} },
+		P2CWindow:      func() time.Duration { return 10 * time.Minute },
+		AccountRegions: store,
+	})
+}
+
+func TestStickyRoute_FirstLeaseWritesPrimaryRegionAndPrefersKnownRegion(t *testing.T) {
+	pool := newRouterTestPool()
+	plat := platform.NewPlatform("plat-region-first", "Plat-Region-First", nil, nil)
+	plat.StickyTTLNs = int64(time.Hour)
+	pool.addPlatform(plat)
+
+	unknownHash, unknownEntry := newRoutableEntry(t, `{"id":"unknown-region"}`, "198.51.100.10")
+	usHash, usEntry := newRoutableEntryWithRegion(t, `{"id":"us-region"}`, "198.51.100.11", "us")
+	pool.addEntry(unknownHash, unknownEntry)
+	pool.addEntry(usHash, usEntry)
+	pool.rebuildPlatformView(plat)
+
+	store := newMemoryAccountRegionStore()
+	router := newTestRouterWithAccountRegions(pool, store)
+
+	res, err := router.RouteRequest(plat.Name, "acct-region-first", "https://example.com")
+	if err != nil {
+		t.Fatalf("RouteRequest: %v", err)
+	}
+	if res.NodeHash != usHash {
+		t.Fatalf("first sticky route should prefer known-region node: got %s want %s", res.NodeHash.Hex(), usHash.Hex())
+	}
+	region, ok := store.GetAccountRegion(plat.ID, "acct-region-first")
+	if !ok || region != "us" {
+		t.Fatalf("stored primary region: got (%q,%v), want (us,true)", region, ok)
+	}
+}
+
+func TestStickyRoute_PrimaryRegionThenFailoverOrder(t *testing.T) {
+	pool := newRouterTestPool()
+	plat := platform.NewPlatform("plat-region-failover", "Plat-Region-Failover", nil, nil)
+	plat.StickyTTLNs = int64(time.Hour)
+	plat.RegionFailoverOrder = []string{"jp", "sg"}
+	pool.addPlatform(plat)
+
+	jpHash, jpEntry := newRoutableEntryWithRegion(t, `{"id":"jp-region"}`, "198.51.100.20", "jp")
+	sgHash, sgEntry := newRoutableEntryWithRegion(t, `{"id":"sg-region"}`, "198.51.100.21", "sg")
+	pool.addEntry(jpHash, jpEntry)
+	pool.addEntry(sgHash, sgEntry)
+	pool.rebuildPlatformView(plat)
+
+	store := newMemoryAccountRegionStore()
+	store.EnsureAccountRegion(plat.ID, "acct-primary-sg", "sg")
+	router := newTestRouterWithAccountRegions(pool, store)
+
+	res, err := router.RouteRequest(plat.Name, "acct-primary-sg", "https://example.com")
+	if err != nil {
+		t.Fatalf("RouteRequest primary: %v", err)
+	}
+	if res.NodeHash != sgHash {
+		t.Fatalf("primary region should win before failover order: got %s want %s", res.NodeHash.Hex(), sgHash.Hex())
+	}
+
+	router.DeleteLease(plat.ID, "acct-primary-sg")
+	sgEntry.CircuitOpenSince.Store(time.Now().UnixNano())
+	plat.NotifyDirty(
+		sgHash,
+		pool.GetEntry,
+		func(_ string, _ node.Hash) (string, bool, []string, bool) { return "", true, nil, true },
+		func(_ netip.Addr) string { return "" },
+	)
+
+	res, err = router.RouteRequest(plat.Name, "acct-primary-sg", "https://example.com")
+	if err != nil {
+		t.Fatalf("RouteRequest failover: %v", err)
+	}
+	if res.NodeHash != jpHash {
+		t.Fatalf("primary unavailable should use first available failover region: got %s want %s", res.NodeHash.Hex(), jpHash.Hex())
+	}
+	region, _ := store.GetAccountRegion(plat.ID, "acct-primary-sg")
+	if region != "sg" {
+		t.Fatalf("fallback route must not rewrite primary region, got %q", region)
+	}
+}
+
+func TestStickyRoute_SameIPRotationBeatsRegionFailover(t *testing.T) {
+	pool := newRouterTestPool()
+	plat := platform.NewPlatform("plat-same-ip-region", "Plat-Same-IP-Region", nil, nil)
+	plat.StickyTTLNs = int64(time.Hour)
+	plat.RegionFailoverOrder = []string{"jp"}
+	pool.addPlatform(plat)
+
+	currentHash, currentEntry := newRoutableEntryWithRegion(t, `{"id":"current-us"}`, "198.51.100.30", "us")
+	sameIPHash, sameIPEntry := newRoutableEntryWithRegion(t, `{"id":"same-ip-us"}`, "198.51.100.30", "us")
+	jpHash, jpEntry := newRoutableEntryWithRegion(t, `{"id":"jp-other-ip"}`, "198.51.100.31", "jp")
+	pool.addEntry(currentHash, currentEntry)
+	pool.addEntry(sameIPHash, sameIPEntry)
+	pool.addEntry(jpHash, jpEntry)
+	pool.rebuildPlatformView(plat)
+
+	currentEntry.CircuitOpenSince.Store(time.Now().UnixNano())
+	plat.NotifyDirty(
+		currentHash,
+		pool.GetEntry,
+		func(_ string, _ node.Hash) (string, bool, []string, bool) { return "", true, nil, true },
+		func(_ netip.Addr) string { return "" },
+	)
+
+	store := newMemoryAccountRegionStore()
+	store.EnsureAccountRegion(plat.ID, "acct-same-ip", "jp")
+	router := newTestRouterWithAccountRegions(pool, store)
+	state := router.ensurePlatformState(plat.ID)
+	state.Leases.CreateLease("acct-same-ip", Lease{
+		NodeHash:       currentHash,
+		EgressIP:       currentEntry.GetEgressIP(),
+		ExpiryNs:       time.Now().Add(time.Hour).UnixNano(),
+		LastAccessedNs: time.Now().UnixNano(),
+	})
+
+	res, err := router.RouteRequest(plat.Name, "acct-same-ip", "https://example.com")
+	if err != nil {
+		t.Fatalf("RouteRequest: %v", err)
+	}
+	if res.NodeHash != sameIPHash {
+		t.Fatalf("same-IP replacement should beat region preference: got %s want %s (jp=%s)", res.NodeHash.Hex(), sameIPHash.Hex(), jpHash.Hex())
+	}
+	if res.LeaseCreated {
+		t.Fatal("same-IP replacement should not create a new lease")
+	}
+}
+
+func TestStickyRoute_ExpiredLeaseRecreatesOnSameIPBeforeRegion(t *testing.T) {
+	pool := newRouterTestPool()
+	plat := platform.NewPlatform("plat-expired-same-ip", "Plat-Expired-Same-IP", nil, nil)
+	plat.StickyTTLNs = int64(time.Hour)
+	plat.RegionFailoverOrder = []string{"jp"}
+	pool.addPlatform(plat)
+
+	currentHash, currentEntry := newRoutableEntryWithRegion(t, `{"id":"expired-current-us"}`, "198.51.100.40", "us")
+	sameIPHash, sameIPEntry := newRoutableEntryWithRegion(t, `{"id":"expired-same-ip-us"}`, "198.51.100.40", "us")
+	jpHash, jpEntry := newRoutableEntryWithRegion(t, `{"id":"expired-jp"}`, "198.51.100.41", "jp")
+	pool.addEntry(currentHash, currentEntry)
+	pool.addEntry(sameIPHash, sameIPEntry)
+	pool.addEntry(jpHash, jpEntry)
+	pool.rebuildPlatformView(plat)
+
+	currentEntry.CircuitOpenSince.Store(time.Now().UnixNano())
+	plat.NotifyDirty(
+		currentHash,
+		pool.GetEntry,
+		func(_ string, _ node.Hash) (string, bool, []string, bool) { return "", true, nil, true },
+		func(_ netip.Addr) string { return "" },
+	)
+
+	store := newMemoryAccountRegionStore()
+	store.EnsureAccountRegion(plat.ID, "acct-expired-same-ip", "jp")
+	router := newTestRouterWithAccountRegions(pool, store)
+	state := router.ensurePlatformState(plat.ID)
+	state.Leases.CreateLease("acct-expired-same-ip", Lease{
+		NodeHash:       currentHash,
+		EgressIP:       currentEntry.GetEgressIP(),
+		CreatedAtNs:    time.Now().Add(-2 * time.Hour).UnixNano(),
+		ExpiryNs:       time.Now().Add(-1 * time.Minute).UnixNano(),
+		LastAccessedNs: time.Now().Add(-2 * time.Hour).UnixNano(),
+	})
+
+	res, err := router.RouteRequest(plat.Name, "acct-expired-same-ip", "https://example.com")
+	if err != nil {
+		t.Fatalf("RouteRequest: %v", err)
+	}
+	if res.NodeHash != sameIPHash {
+		t.Fatalf("expired lease should recreate on same IP before region: got %s want %s (jp=%s)", res.NodeHash.Hex(), sameIPHash.Hex(), jpHash.Hex())
+	}
+	if !res.LeaseCreated {
+		t.Fatal("expired same-IP reuse should create a fresh lease")
+	}
+	if got := state.IPLoadStats.Get(sameIPEntry.GetEgressIP()); got != 1 {
+		t.Fatalf("same IP load should remain 1 after expired recreate, got %d", got)
+	}
 }
 
 func TestStickyLeaseHit_RefreshesExpiryOnlyWhenSlidingEnabled(t *testing.T) {
